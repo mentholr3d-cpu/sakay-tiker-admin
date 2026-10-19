@@ -28,7 +28,7 @@ class MyApp extends StatelessWidget {
     const softGreenBg = Color(0xFFEAF5EC);
 
     return MaterialApp(
-      title: 'Sakay Tiker',
+      title: 'Sakay Tiker Admin',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

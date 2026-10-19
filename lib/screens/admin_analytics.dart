@@ -40,20 +40,34 @@ class AdminAnalyticsScreen extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _heroStat('$totalRides', 'Total Rides Facilitated', Icons.directions_car),
-          ),
-          Container(width: 1, height: 60, color: Colors.white.withValues(alpha: 0.25)),
-          Expanded(
-            child: _heroStat('₱${totalRevenue.toStringAsFixed(0)}', 'Total Revenue Generated', Icons.trending_up),
-          ),
-          Container(width: 1, height: 60, color: Colors.white.withValues(alpha: 0.25)),
-          Expanded(
-            child: _heroStat('$approvedDrivers', 'Verified Drivers', Icons.verified),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final narrow = c.maxWidth < 560;
+          final rides = _heroStat('$totalRides', 'Total Rides Facilitated', Icons.directions_car);
+          final revenue = _heroStat('₱${totalRevenue.toStringAsFixed(0)}', 'Total Revenue Generated', Icons.trending_up);
+          final drivers = _heroStat('$approvedDrivers', 'Verified Drivers', Icons.verified);
+          final line = Colors.white.withValues(alpha: 0.25);
+          if (narrow) {
+            return Column(
+              children: [
+                rides,
+                Container(height: 1, margin: const EdgeInsets.symmetric(vertical: 12), color: line),
+                revenue,
+                Container(height: 1, margin: const EdgeInsets.symmetric(vertical: 12), color: line),
+                drivers,
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: rides),
+              Container(width: 1, height: 60, color: line),
+              Expanded(child: revenue),
+              Container(width: 1, height: 60, color: line),
+              Expanded(child: drivers),
+            ],
+          );
+        },
       ),
     );
   }

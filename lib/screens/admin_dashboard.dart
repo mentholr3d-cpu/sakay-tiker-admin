@@ -851,9 +851,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return months[month - 1];
   }
 
-  Widget _buildTopHeader() {
+  Widget _buildTopHeader({bool compact = false}) {
     return SizedBox(
-      height: 130,
+      height: compact ? 92 : 130,
       width: double.infinity,
       child: Stack(
         fit: StackFit.expand,
@@ -867,47 +867,60 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
             ),
           ),
-          const Positioned(
+          Positioned(
             left: 0,
             right: 0,
             bottom: 0,
-            child: MountainSilhouette(height: 55),
+            child: MountainSilhouette(height: compact ? 38 : 55),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 32),
             child: Row(
               children: [
+                if (compact)
+                  Builder(
+                    builder: (ctx) => IconButton(
+                      icon: const Icon(Icons.menu, color: Colors.white),
+                      tooltip: 'Menu',
+                      onPressed: () => Scaffold.of(ctx).openDrawer(),
+                    ),
+                  ),
                 Container(
-                  padding: const EdgeInsets.all(10),
+                  padding: EdgeInsets.all(compact ? 6 : 10),
                   decoration: const BoxDecoration(
                     color: Colors.white,
                     shape: BoxShape.circle,
                   ),
-                  child: Image.asset('assets/images/logo.png', height: 64),
+                  child: Image.asset('assets/images/logo.png', height: compact ? 36 : 64),
                 ),
-                const SizedBox(width: 18),
-                Column(
+                SizedBox(width: compact ? 10 : 18),
+                Flexible(
+                  child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text(
+                    Text(
                       'Sakay Tiker Admin',
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 22,
+                        fontSize: compact ? 16 : 22,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Your Ride, Your Way · Central Bontoc, Mountain Province',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.85),
-                        fontSize: 13,
-                        fontStyle: FontStyle.italic,
+                    if (!compact) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Your Ride, Your Way · Central Bontoc, Mountain Province',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.85),
+                          fontSize: 13,
+                          fontStyle: FontStyle.italic,
+                        ),
                       ),
-                    ),
+                    ],
                   ],
+                  ),
                 ),
                 const Spacer(),
                 StreamBuilder<QuerySnapshot>(
@@ -918,7 +931,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   builder: (context, snapshot) {
                     final count = snapshot.data?.docs.length ?? 0;
                     return Padding(
-                      padding: const EdgeInsets.only(right: 8.0),
+                      padding: EdgeInsets.only(right: compact ? 0 : 8.0),
                       child: Stack(
                         clipBehavior: Clip.none,
                         children: [
@@ -946,17 +959,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     );
                   },
                 ),
-                Container(
-                  height: 32,
-                  width: 1,
-                  color: Colors.white.withValues(alpha: 0.3),
-                  margin: const EdgeInsets.symmetric(horizontal: 12),
-                ),
-                Text(
-                  '${_weekday(DateTime.now().weekday)}, ${_month(DateTime.now().month)} ${DateTime.now().day}',
-                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(width: 16),
+                if (!compact) ...[
+                  Container(
+                    height: 32,
+                    width: 1,
+                    color: Colors.white.withValues(alpha: 0.3),
+                    margin: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  Text(
+                    '${_weekday(DateTime.now().weekday)}, ${_month(DateTime.now().month)} ${DateTime.now().day}',
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(width: 16),
+                ],
                 IconButton(
                   icon: const Icon(Icons.logout, color: Colors.white),
                   onPressed: () => _confirmLogout(context),
@@ -969,9 +984,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildSidebar() {
+  Widget _buildSidebar({bool inDrawer = false}) {
     return Container(
-      width: 220,
+      width: inDrawer ? double.infinity : 220,
       color: const Color(0xFFEAF5EC),
       child: Column(
         children: [
@@ -989,7 +1004,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               borderRadius: BorderRadius.circular(10),
               child: InkWell(
                 borderRadius: BorderRadius.circular(10),
-                onTap: () => setState(() => _selectedIndex = index),
+                onTap: () {
+                  setState(() => _selectedIndex = index);
+                  if (inDrawer) Navigator.pop(context);
+                },
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
                   child: Row(
@@ -1026,35 +1044,53 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Column(
-        children: [
-          _buildTopHeader(),
-          Expanded(
-            child: Row(
-              children: [
-                _buildSidebar(),
-                const VerticalDivider(width: 1),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Text(
-                          _pages[_selectedIndex],
-                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
-                        ),
-                      ),
-                      Expanded(child: _getSelectedPage()),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // On a phone-sized screen the side menu becomes a slide-out drawer.
+        final narrow = constraints.maxWidth < 800;
+        return Scaffold(
+          drawer: narrow
+              ? Drawer(
+                  backgroundColor: const Color(0xFFEAF5EC),
+                  child: SafeArea(child: _buildSidebar(inDrawer: true)),
+                )
+              : null,
+          body: Column(
+            children: [
+              _buildTopHeader(compact: narrow),
+              Expanded(
+                child: Row(
+                  children: [
+                    if (!narrow) ...[
+                      _buildSidebar(),
+                      const VerticalDivider(width: 1),
                     ],
-                  ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: EdgeInsets.all(narrow ? 12.0 : 16.0),
+                            child: Text(
+                              _pages[_selectedIndex],
+                              style: TextStyle(
+                                fontSize: narrow ? 20 : 24,
+                                fontWeight: FontWeight.bold,
+                                color: const Color(0xFF1B5E20),
+                              ),
+                            ),
+                          ),
+                          Expanded(child: _getSelectedPage()),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

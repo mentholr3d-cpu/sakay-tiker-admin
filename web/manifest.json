@@ -1,12 +1,11 @@
 {
-    "name": "sakay_tiker_admin",
-    "short_name": "sakay_tiker_admin",
+    "name": "Sakay Tiker Admin",
+    "short_name": "Sakay Admin",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#EAF5EC",
+    "theme_color": "#1B5E20",
+    "description": "Sakay Tiker Admin - manage drivers, passengers, rides and commissions.",
     "prefer_related_applications": false,
     "icons": [
         {
