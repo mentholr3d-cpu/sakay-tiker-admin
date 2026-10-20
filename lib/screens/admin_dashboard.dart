@@ -11,6 +11,8 @@ import '../widgets/version_label.dart';
 import 'dart:async';
 import '../widgets/mountain_silhouette.dart';
 import '../widgets/animated_press.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../utils/sms_service.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -153,6 +155,47 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         .collection('drivers')
         .doc(driverId)
         .update({'status': newStatus});
+
+    if (newStatus == 'approved') {
+      await _notifyDriver(
+        driverId,
+        'Sakay Tiker: Your driver application has been APPROVED. You can now log in and start accepting rides.',
+      );
+    }
+  }
+
+  /// Texts the driver through the SMS Worker. If it cannot be sent the admin gets a button to send it by hand.
+  Future<void> _notifyDriver(String driverId, String message) async {
+    String? phone;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('drivers').doc(driverId).get();
+      phone = doc.data()?['phoneNumber']?.toString();
+    } catch (_) {}
+
+    final sent = await SmsService.notifyDriver(driverId);
+    if (!mounted) return;
+
+    final number = phone;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: Duration(seconds: sent ? 4 : 10),
+        content: Text(sent
+            ? 'Saved. The driver was notified by SMS.'
+            : 'Saved, but the SMS was not sent. You can text the driver yourself.'),
+        action: (!sent && number != null && number.isNotEmpty)
+            ? SnackBarAction(
+                label: 'Text driver',
+                onPressed: () => launchUrl(
+                  Uri(
+                    scheme: 'sms',
+                    path: SmsService.formatPhone(number),
+                    queryParameters: {'body': message},
+                  ),
+                ),
+              )
+            : null,
+      ),
+    );
   }
 
   Future<void> _showRejectDialog(BuildContext context, String driverId) async {
@@ -217,6 +260,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       'status': 'rejected',
       'rejectionReason': fullReason,
     });
+
+    await _notifyDriver(
+      driverId,
+      'Sakay Tiker: Your driver application was declined. Reason: $fullReason. You can register again with clearer documents. Questions? sakaytiker.support@gmail.com',
+    );
   }
 
   Widget _docImage(dynamic url) {
