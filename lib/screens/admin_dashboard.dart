@@ -13,6 +13,7 @@ import '../widgets/mountain_silhouette.dart';
 import '../widgets/animated_press.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../utils/sms_service.dart';
+import 'admin_account_dialogs.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -1020,6 +1021,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                   const SizedBox(width: 16),
                 ],
+                IconButton(
+                  tooltip: 'Change password',
+                  icon: const Icon(Icons.key, color: Colors.white),
+                  onPressed: () => showChangePasswordDialog(context),
+                ),
                 IconButton(
                   icon: const Icon(Icons.logout, color: Colors.white),
                   onPressed: () => _confirmLogout(context),

@@ -5,6 +5,7 @@ import '../utils/password_utils.dart';
 import '../widgets/animated_press.dart';
 import '../widgets/mountain_silhouette.dart';
 import 'admin_dashboard.dart';
+import 'admin_account_dialogs.dart';
 
 class AdminLoginScreen extends StatefulWidget {
   const AdminLoginScreen({super.key});
@@ -17,6 +18,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _emailController = TextEditingController();
   bool _obscure = true;
   bool _isLoading = false;
   bool? _accountExists;
@@ -41,6 +43,13 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       return;
     }
 
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(_emailController.text.trim())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid recovery email')),
+      );
+      return;
+    }
+
     if (_passwordController.text.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Password must be at least 6 characters')),
@@ -60,6 +69,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
     await FirebaseFirestore.instance.collection('admin_config').doc('credentials').set({
       'username': _usernameController.text.trim(),
       'passwordHash': hashPassword(_passwordController.text),
+      'email': _emailController.text.trim(),
       'createdAt': FieldValue.serverTimestamp(),
     });
 
@@ -112,6 +122,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
     _usernameController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _emailController.dispose();
     super.dispose();
   }
 
@@ -224,6 +235,25 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                                 decoration: const InputDecoration(
                                   labelText: 'Confirm Password',
                                   prefixIcon: Icon(Icons.lock_outline),
+                                ),
+                              ),
+                            ],
+                            if (isSetup) ...[
+                              const SizedBox(height: 14),
+                              TextField(
+                                controller: _emailController,
+                                keyboardType: TextInputType.emailAddress,
+                                decoration: const InputDecoration(
+                                  labelText: 'Recovery Email',
+                                  prefixIcon: Icon(Icons.email_outlined),
+                                ),
+                              ),
+                            ] else ...[
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () => showForgotPasswordDialog(context),
+                                  child: const Text('Forgot password?'),
                                 ),
                               ),
                             ],

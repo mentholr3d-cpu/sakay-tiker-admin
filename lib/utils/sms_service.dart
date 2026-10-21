@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 class SmsService {
   /// Paste your Worker address here, for example
   /// 'https://sakay-tiker-sms.your-name.workers.dev'
-  static const String workerUrl = 'https://sakay-tiker-sms.mentholr3d.workers.dev';
+  static const String workerUrl = 'https://sakay-tiker-sms2.mentholr3d.workers.dev';
 
   /// Returns true if the Worker sent the driver's approval/decline text.
   static Future<bool> notifyDriver(String driverId) async {

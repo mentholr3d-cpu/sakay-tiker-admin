@@ -364,7 +364,7 @@ class AdminAnalyticsScreen extends StatelessWidget {
                   ),
                 );
               },
-            );
+            );  
           },
         );
       },
