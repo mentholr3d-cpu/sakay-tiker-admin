@@ -194,56 +194,146 @@ class _AdminCommissionScreenState extends State<AdminCommissionScreen> {
     });
   }
 
-  Future<void> _markAsPaid(
-      BuildContext context, String driverId, String monthKey, num balance, num earned) async {
+  Future<void> _rejectPayment(BuildContext context, String driverId, String monthKey) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Confirm Payment'),
-        content: Text('Mark ₱$balance as paid/collected for this driver for $monthKey? This will also reactivate their account if suspended.'),
+        title: const Text('Reject Payment'),
+        content: Text('Reject the submitted payment for $monthKey? The driver will see that it was not confirmed and can pay again.'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Confirm'),
+            child: const Text('Reject'),
           ),
         ],
       ),
     );
-
     if (confirmed != true) return;
 
+    await FirebaseFirestore.instance
+        .collection('drivers')
+        .doc(driverId)
+        .collection('commission_records')
+        .doc(monthKey)
+        .update({'paymentSubmitted': false, 'paymentRejected': true});
+  }
+
+  /// Record a payment (reduce the balance) or correct one (add it back).
+  /// A partial amount leaves the rest as balance and the month as "partial".
+  Future<void> _markAsPaid(
+      BuildContext context, String driverId, String monthKey, num balance, num earned) async {
     final ref = FirebaseFirestore.instance
         .collection('drivers')
         .doc(driverId)
         .collection('commission_records')
         .doc(monthKey);
 
-    await FirebaseFirestore.instance.runTransaction((transaction) async {
-      final doc = await transaction.get(ref);
-      final data = doc.data() ?? {};
-      final recorded = (data['totalEarned'] ?? 0) as num;
-      final total = recorded > earned ? recorded : earned;
+    final snap = await ref.get();
+    if (!context.mounted) return;
+    final data = snap.data() ?? {};
+    final recorded = (data['totalEarned'] ?? 0) as num;
+    final total = recorded > earned ? recorded : earned;
+    final alreadyPaid = (data['amountPaid'] ?? 0) as num;
+    final submittedAmount = data['paymentSubmitted'] == true ? (data['submittedAmount'] as num?) : null;
+    final suggested = (submittedAmount != null && submittedAmount > 0)
+        ? submittedAmount
+        : (total - alreadyPaid > 0 ? total - alreadyPaid : 0);
 
-      // set + merge also repairs a month whose record was missing or too low.
-      transaction.set(
-        ref,
-        {
-          'month': monthKey,
-          'totalEarned': total,
-          'amountPaid': total,
-          'status': 'paid',
-        },
-        SetOptions(merge: true),
-      );
-    });
+    final amountController = TextEditingController(text: suggested.toString());
+    bool reduce = true;
+    String? error;
 
-    await FirebaseFirestore.instance.collection('drivers').doc(driverId).update({
-      'accountStatus': 'active',
-    });
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setLocal) => AlertDialog(
+          title: Text('Adjust balance - $monthKey'),
+          content: SizedBox(
+            width: 340,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Commission: ₱$total\nPaid so far: ₱$alreadyPaid\nBalance: ₱${total - alreadyPaid > 0 ? total - alreadyPaid : 0}'),
+                if (submittedAmount != null) ...[
+                  const SizedBox(height: 8),
+                  Text('Driver says they paid: ₱$submittedAmount. Check your GCash first.',
+                      style: const TextStyle(color: Colors.indigo, fontSize: 12.5)),
+                ],
+                const SizedBox(height: 12),
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(value: true, label: Text('Minus (payment)')),
+                    ButtonSegment(value: false, label: Text('Add back')),
+                  ],
+                  selected: {reduce},
+                  onSelectionChanged: (v) => setLocal(() => reduce = v.first),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: amountController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: reduce ? 'Amount received (₱)' : 'Amount to add back to balance (₱)',
+                    errorText: error,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  reduce
+                      ? 'The amount is subtracted from the balance. If something is left, the month stays "partial" and the driver sees the new balance.'
+                      : 'Use this to fix a mistake. The amount is added back to the balance.',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () {
+                final value = num.tryParse(amountController.text.trim());
+                if (value == null || value <= 0) {
+                  setLocal(() => error = 'Enter an amount above 0');
+                  return;
+                }
+                Navigator.pop(dialogContext, {'amount': value, 'reduce': reduce});
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null) return;
+
+    final amount = result['amount'] as num;
+    final isReduce = result['reduce'] as bool;
+    num newPaid = isReduce ? alreadyPaid + amount : alreadyPaid - amount;
+    if (newPaid > total) newPaid = total;
+    if (newPaid < 0) newPaid = 0;
+    final newBalance = total - newPaid;
+
+    await ref.set(
+      {
+        'month': monthKey,
+        'totalEarned': total,
+        'amountPaid': newPaid,
+        'status': newBalance <= 0 ? 'paid' : (newPaid > 0 ? 'partial' : 'unpaid'),
+        'paymentSubmitted': false,
+        'paymentRejected': false,
+        'verifiedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+
+    if (newBalance <= 0) {
+      await FirebaseFirestore.instance.collection('drivers').doc(driverId).update({
+        'accountStatus': 'active',
+      });
+    }
   }
 
   Future<void> _toggleSuspend(BuildContext context, String driverId, bool suspend) async {
@@ -354,6 +444,7 @@ class _AdminCommissionScreenState extends State<AdminCommissionScreen> {
                         rideMonths: rideSums[driverDoc.id] ?? const {},
                         onMarkPaid: (monthKey, balance, earned) =>
                             _markAsPaid(context, driverDoc.id, monthKey, balance, earned),
+                        onRejectPayment: (monthKey) => _rejectPayment(context, driverDoc.id, monthKey),
                         onToggleSuspend: () => _toggleSuspend(context, driverDoc.id, !isSuspended),
                       );
                     },
@@ -377,6 +468,7 @@ class _DriverCommissionCard extends StatefulWidget {
   final String currentMonth;
   final Map<String, num> rideMonths;
   final void Function(String monthKey, num balance, num earned) onMarkPaid;
+  final void Function(String monthKey) onRejectPayment;
   final VoidCallback onToggleSuspend;
 
   const _DriverCommissionCard({
@@ -387,6 +479,7 @@ class _DriverCommissionCard extends StatefulWidget {
     required this.currentMonth,
     required this.rideMonths,
     required this.onMarkPaid,
+    required this.onRejectPayment,
     required this.onToggleSuspend,
   });
 
@@ -443,6 +536,7 @@ class _DriverCommissionCardState extends State<_DriverCommissionCard> {
         final receiptUrl = current?['receiptUrl'];
         final isEarlyPayment = current?['isEarlyPayment'] == true;
         final currentPaid = current?['status'] == 'paid';
+        final anySubmitted = records.values.any((r) => r['paymentSubmitted'] == true && r['status'] != 'paid');
 
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
@@ -476,6 +570,18 @@ class _DriverCommissionCardState extends State<_DriverCommissionCard> {
                                 style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                               ),
                             ),
+                          if (anySubmitted)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.indigo.shade100,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'PAYMENT TO VERIFY',
+                                style: TextStyle(color: Colors.indigo.shade800, fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
                           if (currentPaid && isEarlyPayment)
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -507,14 +613,18 @@ class _DriverCommissionCardState extends State<_DriverCommissionCard> {
                           final paid = months[month]!['paid']!;
                           final balance = earned - paid;
                           final isCurrent = month == widget.currentMonth;
+                          final rec = records[month];
+                          final submitted = rec?['paymentSubmitted'] == true && rec?['status'] != 'paid';
                           final label = isCurrent
                               ? '$month (this month)'
                               : (balance > 0 ? '$month (OVERDUE)' : month);
 
                           return Padding(
                             padding: const EdgeInsets.symmetric(vertical: 2),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
+                            child: Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 8,
+                              runSpacing: 4,
                               children: [
                                 Text(
                                   '$label: ₱$earned earned, ₱$paid paid, ₱${balance > 0 ? balance : 0} balance',
@@ -524,8 +634,33 @@ class _DriverCommissionCardState extends State<_DriverCommissionCard> {
                                     color: balance > 0 && !isCurrent ? Colors.red : null,
                                   ),
                                 ),
-                                if (balance > 0) ...[
-                                  const SizedBox(width: 8),
+                                if (submitted)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: Colors.indigo.shade100,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      'SUBMITTED',
+                                      style: TextStyle(color: Colors.indigo.shade800, fontSize: 10, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                if (submitted && rec?['receiptUrl'] != null)
+                                  GestureDetector(
+                                    onTap: () => showDialog(
+                                      context: context,
+                                      builder: (_) => PhotoDialog(url: '${rec!['receiptUrl']}', title: 'Receipt $month'),
+                                    ),
+                                    child: const Text(
+                                      '🧾 Receipt',
+                                      style: TextStyle(color: Colors.blue, fontSize: 12, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                if (submitted && rec?['gcashReference'] != null)
+                                  Text('Ref: ${rec!['gcashReference']}',
+                                      style: const TextStyle(fontSize: 12, color: Colors.blueGrey)),
+                                if (balance > 0)
                                   AnimatedPress(
                                     onTap: () => widget.onMarkPaid(month, balance, earned),
                                     child: OutlinedButton(
@@ -534,10 +669,34 @@ class _DriverCommissionCardState extends State<_DriverCommissionCard> {
                                         padding: const EdgeInsets.symmetric(horizontal: 10),
                                       ),
                                       onPressed: () {},
-                                      child: const Text('Mark Paid', style: TextStyle(fontSize: 12)),
+                                      child: Text(submitted ? 'Confirm / Adjust' : 'Mark Paid', style: const TextStyle(fontSize: 12)),
                                     ),
                                   ),
-                                ],
+                                if (balance <= 0 && earned > 0)
+                                  AnimatedPress(
+                                    onTap: () => widget.onMarkPaid(month, balance, earned),
+                                    child: TextButton(
+                                      style: TextButton.styleFrom(
+                                        minimumSize: const Size(0, 28),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                                      ),
+                                      onPressed: () {},
+                                      child: const Text('Adjust', style: TextStyle(fontSize: 12)),
+                                    ),
+                                  ),
+                                if (submitted)
+                                  AnimatedPress(
+                                    onTap: () => widget.onRejectPayment(month),
+                                    child: TextButton(
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.red,
+                                        minimumSize: const Size(0, 28),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                                      ),
+                                      onPressed: () {},
+                                      child: const Text('Reject', style: TextStyle(fontSize: 12)),
+                                    ),
+                                  ),
                               ],
                             ),
                           );
