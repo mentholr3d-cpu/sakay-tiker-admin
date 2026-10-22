@@ -194,6 +194,28 @@ class _AdminCommissionScreenState extends State<AdminCommissionScreen> {
     });
   }
 
+  /// After the admin reviews a payment: clear the driver's "payment to verify" flag
+  /// when nothing else is waiting, and tell the driver the result.
+  Future<void> _afterReview(String driverId, String title, String message) async {
+    final driverRef = FirebaseFirestore.instance.collection('drivers').doc(driverId);
+    final waiting = await driverRef
+        .collection('commission_records')
+        .where('paymentSubmitted', isEqualTo: true)
+        .limit(1)
+        .get();
+    if (waiting.docs.isEmpty) {
+      await driverRef.update({'commissionPaymentPending': false});
+    }
+    await FirebaseFirestore.instance.collection('notifications').add({
+      'recipientId': driverId,
+      'recipientRole': 'driver',
+      'title': title,
+      'message': message,
+      'read': false,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   Future<void> _rejectPayment(BuildContext context, String driverId, String monthKey) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -218,6 +240,12 @@ class _AdminCommissionScreenState extends State<AdminCommissionScreen> {
         .collection('commission_records')
         .doc(monthKey)
         .update({'paymentSubmitted': false, 'paymentRejected': true});
+
+    await _afterReview(
+      driverId,
+      'Payment Not Confirmed',
+      'The admin could not confirm your commission payment for $monthKey. Please check the amount and receipt, then pay again.',
+    );
   }
 
   /// Record a payment (reduce the balance) or correct one (add it back).
@@ -334,6 +362,15 @@ class _AdminCommissionScreenState extends State<AdminCommissionScreen> {
         'accountStatus': 'active',
       });
     }
+
+    await _afterReview(
+      driverId,
+      isReduce ? 'Payment Confirmed' : 'Balance Adjusted',
+      isReduce
+          ? 'Your commission payment of ₱$amount for $monthKey was confirmed. '
+              '${newBalance <= 0 ? 'This month is fully paid.' : 'Remaining balance: ₱$newBalance.'}'
+          : 'The admin adjusted your commission for $monthKey. Balance: ₱$newBalance.',
+    );
   }
 
   Future<void> _toggleSuspend(BuildContext context, String driverId, bool suspend) async {

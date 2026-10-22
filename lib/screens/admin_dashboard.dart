@@ -978,33 +978,64 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       .where('status', isEqualTo: 'pending')
                       .snapshots(),
                   builder: (context, snapshot) {
-                    final count = snapshot.data?.docs.length ?? 0;
-                    return Padding(
-                      padding: EdgeInsets.only(right: compact ? 0 : 8.0),
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.notifications_outlined, color: Colors.white, size: 26),
-                            onPressed: () => _navigateTo(1, driversSubTab: 0),
-                          ),
-                          if (count > 0)
-                            Positioned(
-                              right: 4,
-                              top: 4,
-                              child: Container(
-                                padding: const EdgeInsets.all(3),
-                                decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                                child: Text(
-                                  '$count',
-                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                  textAlign: TextAlign.center,
-                                ),
+                    final pendingDrivers = snapshot.data?.docs.length ?? 0;
+                    return StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection('drivers')
+                          .where('commissionPaymentPending', isEqualTo: true)
+                          .snapshots(),
+                      builder: (context, paySnapshot) {
+                        final pendingPayments = paySnapshot.data?.docs.length ?? 0;
+                        final count = pendingDrivers + pendingPayments;
+                        return Padding(
+                          padding: EdgeInsets.only(right: compact ? 0 : 8.0),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              PopupMenuButton<int>(
+                                tooltip: 'Notifications',
+                                icon: const Icon(Icons.notifications_outlined, color: Colors.white, size: 26),
+                                onSelected: (tab) => _navigateTo(1, driversSubTab: tab),
+                                itemBuilder: (context) => [
+                                  if (pendingDrivers > 0)
+                                    PopupMenuItem(
+                                      value: 0,
+                                      child: Text('$pendingDrivers driver registration${pendingDrivers == 1 ? '' : 's'} to review'),
+                                    ),
+                                  if (pendingPayments > 0)
+                                    PopupMenuItem(
+                                      value: 2,
+                                      child: Text('$pendingPayments commission payment${pendingPayments == 1 ? '' : 's'} to verify'),
+                                    ),
+                                  if (count == 0)
+                                    const PopupMenuItem(
+                                      enabled: false,
+                                      value: -1,
+                                      child: Text('No new notifications'),
+                                    ),
+                                ],
                               ),
-                            ),
-                        ],
-                      ),
+                              if (count > 0)
+                                Positioned(
+                                  right: 4,
+                                  top: 4,
+                                  child: IgnorePointer(
+                                    child: Container(
+                                      padding: const EdgeInsets.all(3),
+                                      decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                                      child: Text(
+                                        '$count',
+                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
                     );
                   },
                 ),
