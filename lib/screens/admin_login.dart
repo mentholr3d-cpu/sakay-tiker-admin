@@ -22,6 +22,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   bool _obscure = true;
   bool _isLoading = false;
   bool? _accountExists;
+  String? _error; // shown in red inside the card, under the fields
 
   @override
   void initState() {
@@ -78,26 +79,40 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
 
   Future<void> _login() async {
     if (_usernameController.text.trim().isEmpty || _passwordController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter username and password')),
-      );
+      setState(() => _error = 'Please enter your username and password.');
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
 
-    final doc = await FirebaseFirestore.instance.collection('admin_config').doc('credentials').get();
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('admin_config')
+          .doc('credentials')
+          .get()
+          .timeout(const Duration(seconds: 15));
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    final data = doc.data();
-    if (data == null ||
-        data['username'] != _usernameController.text.trim() ||
-        data['passwordHash'] != hashPassword(_passwordController.text)) {
-      setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Incorrect username or password')),
-      );
+      final data = doc.data();
+      if (data == null ||
+          data['username'] != _usernameController.text.trim() ||
+          data['passwordHash'] != hashPassword(_passwordController.text)) {
+        setState(() {
+          _isLoading = false;
+          _error = 'Incorrect username or password.';
+        });
+        return;
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = 'Could not connect. Check your internet and try again.';
+      });
       return;
     }
 
@@ -209,6 +224,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                             const SizedBox(height: 20),
                             TextField(
                               controller: _usernameController,
+                              onChanged: (_) {
+                                if (_error != null) setState(() => _error = null);
+                              },
                               decoration: const InputDecoration(
                                 labelText: 'Username',
                                 prefixIcon: Icon(Icons.person_outline),
@@ -218,6 +236,12 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                             TextField(
                               controller: _passwordController,
                               obscureText: _obscure,
+                              onChanged: (_) {
+                                if (_error != null) setState(() => _error = null);
+                              },
+                              onSubmitted: (_) {
+                                if (!_isLoading && !isSetup) _login();
+                              },
                               decoration: InputDecoration(
                                 labelText: 'Password',
                                 prefixIcon: const Icon(Icons.lock_outline),
@@ -254,6 +278,30 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                                 child: TextButton(
                                   onPressed: () => showForgotPasswordDialog(context),
                                   child: const Text('Forgot password?'),
+                                ),
+                              ),
+                            ],
+                            if (_error != null) ...[
+                              const SizedBox(height: 14),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.red.shade200),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.error_outline, size: 18, color: Colors.red.shade700),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        _error!,
+                                        style: TextStyle(fontSize: 13, color: Colors.red.shade800),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
