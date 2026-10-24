@@ -902,7 +902,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildTopHeader({bool compact = false}) {
     return SizedBox(
-      height: compact ? 92 : 130,
+      height: compact ? 64 : 76,
       width: double.infinity,
       child: Stack(
         fit: StackFit.expand,
@@ -920,10 +920,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             left: 0,
             right: 0,
             bottom: 0,
-            child: MountainSilhouette(height: compact ? 38 : 55),
+            child: MountainSilhouette(height: 12),
           ),
           Padding(
-            padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 32),
+            padding: EdgeInsets.fromLTRB(compact ? 8 : 24, 0, compact ? 8 : 24, 8),
             child: Row(
               children: [
                 if (compact)
@@ -935,15 +935,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ),
                   ),
                 Container(
-                  padding: EdgeInsets.all(compact ? 6 : 10),
+                  padding: EdgeInsets.all(compact ? 3 : 4),
                   decoration: const BoxDecoration(
                     color: Colors.white,
                     shape: BoxShape.circle,
                   ),
-                  child: Image.asset('assets/images/logo.png', height: compact ? 36 : 64),
+                  child: Image.asset('assets/images/logo.png', height: compact ? 32 : 40),
                 ),
-                SizedBox(width: compact ? 10 : 18),
-                Flexible(
+                SizedBox(width: compact ? 10 : 14),
+                Expanded(
                   child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
@@ -953,25 +953,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: compact ? 16 : 22,
+                        fontSize: compact ? 16 : 20,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     if (!compact) ...[
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 1),
                       Text(
-                        'Your Ride, Your Way · Central Bontoc, Mountain Province',
+                        'Central Bontoc, Mountain Province',
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.85),
-                          fontSize: 13,
-                          fontStyle: FontStyle.italic,
+                          fontSize: 12,
                         ),
                       ),
                     ],
                   ],
                   ),
                 ),
-                const Spacer(),
+                if (!compact) ...[
+                  Text(
+                    '${_weekday(DateTime.now().weekday)}, ${_month(DateTime.now().month)} ${DateTime.now().day}',
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
+                  Container(
+                    height: 24,
+                    width: 1,
+                    color: Colors.white.withValues(alpha: 0.35),
+                    margin: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                ],
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('drivers')
@@ -988,13 +999,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         final pendingPayments = paySnapshot.data?.docs.length ?? 0;
                         final count = pendingDrivers + pendingPayments;
                         return Padding(
-                          padding: EdgeInsets.only(right: compact ? 0 : 8.0),
+                          padding: EdgeInsets.zero,
                           child: Stack(
                             clipBehavior: Clip.none,
                             children: [
                               PopupMenuButton<int>(
                                 tooltip: 'Notifications',
-                                icon: const Icon(Icons.notifications_outlined, color: Colors.white, size: 26),
+                                iconSize: 24,
+                                padding: const EdgeInsets.all(8),
+                                icon: const Icon(Icons.notifications_outlined, color: Colors.white),
                                 onSelected: (tab) => _navigateTo(1, driversSubTab: tab),
                                 itemBuilder: (context) => [
                                   if (pendingDrivers > 0)
@@ -1039,25 +1052,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     );
                   },
                 ),
-                if (!compact) ...[
-                  Container(
-                    height: 32,
-                    width: 1,
-                    color: Colors.white.withValues(alpha: 0.3),
-                    margin: const EdgeInsets.symmetric(horizontal: 12),
-                  ),
-                  Text(
-                    '${_weekday(DateTime.now().weekday)}, ${_month(DateTime.now().month)} ${DateTime.now().day}',
-                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(width: 16),
-                ],
                 IconButton(
                   tooltip: 'Change password',
+                  iconSize: 24,
+                  padding: const EdgeInsets.all(8),
+                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                   icon: const Icon(Icons.key, color: Colors.white),
                   onPressed: () => showChangePasswordDialog(context),
                 ),
                 IconButton(
+                  tooltip: 'Logout',
+                  iconSize: 24,
+                  padding: const EdgeInsets.all(8),
+                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                   icon: const Icon(Icons.logout, color: Colors.white),
                   onPressed: () => _confirmLogout(context),
                 ),
