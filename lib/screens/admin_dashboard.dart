@@ -28,6 +28,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _ridesSubTab = 0;
 
   String _driverSearch = '';
+  String _driverStatusFilter = 'all'; // all, pending, approved, rejected
   String _rideHistorySearch = '';
 
   // Created once so typing in a search box never restarts the live listeners.
@@ -452,7 +453,29 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           'Search by name or phone',
           (value) => setState(() => _driverSearch = value),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final f in const [
+                ['all', 'All'],
+                ['pending', 'Pending'],
+                ['approved', 'Approved'],
+                ['rejected', 'Rejected'],
+              ])
+                ChoiceChip(
+                  label: Text(f[1]),
+                  selected: _driverStatusFilter == f[0],
+                  selectedColor: const Color(0xFFC8E6C9),
+                  onSelected: (_) => setState(() => _driverStatusFilter = f[0]),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
             stream: _completedRidesStream,
@@ -488,13 +511,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 final data = doc.data() as Map<String, dynamic>;
                 final name = (data['fullName'] ?? '').toString().toLowerCase();
                 final phone = (data['phoneNumber'] ?? '').toString().toLowerCase();
+                if (_driverStatusFilter != 'all' &&
+                    (data['status'] ?? '').toString().toLowerCase() != _driverStatusFilter) {
+                  return false;
+                }
                 return name.contains(query) || phone.contains(query);
               }).toList();
 
               if (drivers.isEmpty) return _buildEmptyState('No matching drivers');
 
               return _scrollableTable(
-                countText: query.isEmpty
+                countText: (query.isEmpty && _driverStatusFilter == 'all')
                     ? 'Total drivers: ${drivers.length}'
                     : 'Showing ${drivers.length} of ${snapshot.data!.docs.length} drivers',
                 DataTable(
