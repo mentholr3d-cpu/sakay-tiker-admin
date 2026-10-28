@@ -39,6 +39,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       .where('status', isEqualTo: 'completed')
       .snapshots();
 
+  // Live streams used only for the red number badges.
+  final Stream<QuerySnapshot> _pendingDriversStream = FirebaseFirestore.instance
+      .collection('drivers')
+      .where('status', isEqualTo: 'pending')
+      .snapshots();
+  final Stream<QuerySnapshot> _pendingPaymentsStream = FirebaseFirestore.instance
+      .collection('drivers')
+      .where('commissionPaymentPending', isEqualTo: true)
+      .snapshots();
+  final Stream<QuerySnapshot> _ongoingRidesStream = FirebaseFirestore.instance
+      .collection('rides')
+      .where('status', whereIn: ['pending', 'negotiating', 'accepted'])
+      .snapshots();
+  final Stream<QuerySnapshot> _rideFeedbackStream =
+      FirebaseFirestore.instance.collection('ride_feedback').snapshots();
+  final Stream<QuerySnapshot> _appFeedbackStream =
+      FirebaseFirestore.instance.collection('app_feedback').snapshots();
+
+  // When the admin last looked at the Feedback page. Newer feedback counts as "new".
+  DateTime? _feedbackLastSeen;
+
   final _driverSearchController = TextEditingController();
   final _rideHistorySearchController = TextEditingController();
 
@@ -73,6 +94,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   void initState() {
     super.initState();
     ServerClock.sync();
+    _loadFeedbackLastSeen();
     // Re-sync the clock every 5 minutes and refresh the page every 30 seconds
     // so online/offline status stays current without pressing refresh.
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (t) {
@@ -89,9 +111,99 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     super.dispose();
   }
 
+  Future<void> _loadFeedbackLastSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ms = prefs.getInt('adminFeedbackLastSeen');
+    if (!mounted) return;
+    if (ms == null) {
+      // First time on this device: start from zero instead of flagging old feedback.
+      setState(_markFeedbackSeen);
+    } else {
+      setState(() => _feedbackLastSeen = DateTime.fromMillisecondsSinceEpoch(ms));
+    }
+  }
+
+  void _markFeedbackSeen() {
+    final now = ServerClock.now();
+    _feedbackLastSeen = now;
+    SharedPreferences.getInstance()
+        .then((p) => p.setInt('adminFeedbackLastSeen', now.millisecondsSinceEpoch));
+  }
+
+  // Call inside setState. Feedback counts as seen when you open or leave that page.
+  void _selectPage(int index) {
+    if (_selectedIndex == 4 || index == 4) _markFeedbackSeen();
+    _selectedIndex = index;
+  }
+
+  // Wraps the screen with the live counts used by all the red badges.
+  Widget _withCounts(Widget Function(_Counts counts) builder) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _pendingDriversStream,
+      builder: (context, pendingSnap) => StreamBuilder<QuerySnapshot>(
+        stream: _pendingPaymentsStream,
+        builder: (context, paySnap) => StreamBuilder<QuerySnapshot>(
+          stream: _ongoingRidesStream,
+          builder: (context, ongoingSnap) => StreamBuilder<QuerySnapshot>(
+            stream: _rideFeedbackStream,
+            builder: (context, rideFbSnap) => StreamBuilder<QuerySnapshot>(
+              stream: _appFeedbackStream,
+              builder: (context, appFbSnap) {
+                int ongoing = 0;
+                for (final d in ongoingSnap.data?.docs ?? <QueryDocumentSnapshot>[]) {
+                  final m = d.data() as Map<String, dynamic>;
+                  final created = m['createdAt'];
+                  // Same rule as the Ongoing list: hide requests nobody accepted in 15 minutes.
+                  if (m['status'] == 'pending' &&
+                      created is Timestamp &&
+                      DateTime.now().difference(created.toDate()).inMinutes >= 15) {
+                    continue;
+                  }
+                  ongoing++;
+                }
+
+                int newFeedback = 0;
+                final seen = _feedbackLastSeen;
+                if (seen != null && _selectedIndex != 4) {
+                  for (final snap in [rideFbSnap, appFbSnap]) {
+                    for (final d in snap.data?.docs ?? <QueryDocumentSnapshot>[]) {
+                      final t = (d.data() as Map<String, dynamic>)['createdAt'];
+                      if (t is Timestamp && t.toDate().isAfter(seen)) newFeedback++;
+                    }
+                  }
+                }
+
+                return builder(_Counts(
+                  pendingDrivers: pendingSnap.data?.docs.length ?? 0,
+                  pendingPayments: paySnap.data?.docs.length ?? 0,
+                  ongoingRides: ongoing,
+                  newFeedback: newFeedback,
+                ));
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // A tab label with a red number next to it when count > 0.
+  Widget _tabLabel(String text, int count) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(text),
+        if (count > 0) ...[
+          const SizedBox(width: 6),
+          _CountBadge(count: count),
+        ],
+      ],
+    );
+  }
+
   void _navigateTo(int pageIndex, {int? driversSubTab, int? ridesSubTab}) {
     setState(() {
-      _selectedIndex = pageIndex;
+      _selectPage(pageIndex);
       if (driversSubTab != null) _driversSubTab = driversSubTab;
       if (ridesSubTab != null) _ridesSubTab = ridesSubTab;
     });
@@ -606,17 +718,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildDriversTab() {
+  Widget _buildDriversTab(_Counts counts) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(value: 0, label: Text('Pending')),
-              ButtonSegment(value: 1, label: Text('All Drivers')),
-              ButtonSegment(value: 2, label: Text('Commission')),
+            segments: [
+              ButtonSegment(value: 0, label: _tabLabel('Pending', counts.pendingDrivers)),
+              const ButtonSegment(value: 1, label: Text('All Drivers')),
+              ButtonSegment(value: 2, label: _tabLabel('Commission', counts.pendingPayments)),
             ],
             selected: {_driversSubTab},
             onSelectionChanged: (newSelection) {
@@ -875,16 +987,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildRidesTab() {
+  Widget _buildRidesTab(_Counts counts) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(value: 0, label: Text('Ongoing')),
-              ButtonSegment(value: 1, label: Text('History')),
+            segments: [
+              ButtonSegment(value: 0, label: _tabLabel('Ongoing', counts.ongoingRides)),
+              const ButtonSegment(value: 1, label: Text('History')),
             ],
             selected: {_ridesSubTab},
             onSelectionChanged: (newSelection) {
@@ -900,16 +1012,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _getSelectedPage() {
+  Widget _getSelectedPage(_Counts counts) {
     switch (_selectedIndex) {
       case 0:
         return AdminAnalyticsScreen(onNavigate: _navigateTo);
       case 1:
-        return _buildDriversTab();
+        return _buildDriversTab(counts);
       case 2:
         return const AdminPassengersScreen();
       case 3:
-        return _buildRidesTab();
+        return _buildRidesTab(counts);
       case 4:
         return const AdminFeedbackScreen();
       default:
@@ -927,7 +1039,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return months[month - 1];
   }
 
-  Widget _buildTopHeader({bool compact = false}) {
+  Widget _buildTopHeader(_Counts counts, {bool compact = false}) {
     return SizedBox(
       height: compact ? 64 : 76,
       width: double.infinity,
@@ -955,10 +1067,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               children: [
                 if (compact)
                   Builder(
-                    builder: (ctx) => IconButton(
-                      icon: const Icon(Icons.menu, color: Colors.white),
-                      tooltip: 'Menu',
-                      onPressed: () => Scaffold.of(ctx).openDrawer(),
+                    builder: (ctx) => Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.menu, color: Colors.white),
+                          tooltip: 'Menu',
+                          onPressed: () => Scaffold.of(ctx).openDrawer(),
+                        ),
+                        Positioned(
+                          right: 2,
+                          top: 2,
+                          child: IgnorePointer(child: _CountBadge(count: counts.total)),
+                        ),
+                      ],
                     ),
                   ),
                 Container(
@@ -1103,7 +1225,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildSidebar({bool inDrawer = false}) {
+  Widget _buildSidebar(_Counts counts, {bool inDrawer = false}) {
     return Container(
       width: inDrawer ? double.infinity : 220,
       color: const Color(0xFFEAF5EC),
@@ -1124,7 +1246,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               child: InkWell(
                 borderRadius: BorderRadius.circular(10),
                 onTap: () {
-                  setState(() => _selectedIndex = index);
+                  setState(() => _selectPage(index));
                   if (inDrawer) Navigator.pop(context);
                 },
                 child: Padding(
@@ -1137,14 +1259,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         size: 22,
                       ),
                       const SizedBox(width: 14),
-                      Text(
-                        item['label'] as String,
-                        style: TextStyle(
-                          color: selected ? Colors.white : const Color(0xFF1B3A22),
-                          fontWeight: selected ? FontWeight.bold : FontWeight.w500,
-                          fontSize: 14,
+                      Expanded(
+                        child: Text(
+                          item['label'] as String,
+                          style: TextStyle(
+                            color: selected ? Colors.white : const Color(0xFF1B3A22),
+                            fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
+                      _CountBadge(count: counts.forPage(index)),
                     ],
                   ),
                 ),
@@ -1163,6 +1288,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return _withCounts(_buildLayout);
+  }
+
+  Widget _buildLayout(_Counts counts) {
     return LayoutBuilder(
       builder: (context, constraints) {
         // On a phone-sized screen the side menu becomes a slide-out drawer.
@@ -1171,17 +1300,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           drawer: narrow
               ? Drawer(
                   backgroundColor: const Color(0xFFEAF5EC),
-                  child: SafeArea(child: _buildSidebar(inDrawer: true)),
+                  child: SafeArea(child: _buildSidebar(counts, inDrawer: true)),
                 )
               : null,
           body: Column(
             children: [
-              _buildTopHeader(compact: narrow),
+              _buildTopHeader(counts, compact: narrow),
               Expanded(
                 child: Row(
                   children: [
                     if (!narrow) ...[
-                      _buildSidebar(),
+                      _buildSidebar(counts),
                       const VerticalDivider(width: 1),
                     ],
                     Expanded(
@@ -1199,7 +1328,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               ),
                             ),
                           ),
-                          Expanded(child: _getSelectedPage()),
+                          Expanded(child: _getSelectedPage(counts)),
                         ],
                       ),
                     ),
@@ -1214,6 +1343,62 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 }
 
+
+/// The numbers shown in the red badges.
+class _Counts {
+  final int pendingDrivers;
+  final int pendingPayments;
+  final int ongoingRides;
+  final int newFeedback;
+
+  const _Counts({
+    required this.pendingDrivers,
+    required this.pendingPayments,
+    required this.ongoingRides,
+    required this.newFeedback,
+  });
+
+  int get drivers => pendingDrivers + pendingPayments;
+  int get total => drivers + ongoingRides + newFeedback;
+
+  // Badge for each side-menu page (0 Overview, 1 Drivers, 2 Passengers, 3 Rides, 4 Feedback).
+  int forPage(int index) {
+    switch (index) {
+      case 1:
+        return drivers;
+      case 3:
+        return ongoingRides;
+      case 4:
+        return newFeedback;
+      default:
+        return 0;
+    }
+  }
+}
+
+/// Small red number. Shows nothing when the count is 0.
+class _CountBadge extends StatelessWidget {
+  final int count;
+  const _CountBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    if (count <= 0) return const SizedBox.shrink();
+    return Container(
+      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Colors.red,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Text(
+        count > 99 ? '99+' : '$count',
+        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+}
 
 /// Shows the total unpaid commission across all months for one driver.
 /// Keeps its own stream so the table can rebuild (e.g. while searching) without flicker.
