@@ -34,9 +34,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   // Created once so typing in a search box never restarts the live listeners.
   final Stream<QuerySnapshot> _driversStream =
       FirebaseFirestore.instance.collection('drivers').snapshots();
-
-  final Stream<QuerySnapshot> _completedRidesStream = FirebaseFirestore
-      .instance
+  final Stream<QuerySnapshot> _completedRidesStream = FirebaseFirestore.instance
       .collection('rides')
       .where('status', isEqualTo: 'completed')
       .snapshots();
@@ -74,9 +72,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   void initState() {
     super.initState();
-
     ServerClock.sync();
-
     // Re-sync the clock every 5 minutes and refresh the page every 30 seconds
     // so online/offline status stays current without pressing refresh.
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (t) {
@@ -93,11 +89,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     super.dispose();
   }
 
-  void _navigateTo(
-    int pageIndex, {
-    int? driversSubTab,
-    int? ridesSubTab,
-  }) {
+  void _navigateTo(int pageIndex, {int? driversSubTab, int? ridesSubTab}) {
     setState(() {
       _selectedIndex = pageIndex;
       if (driversSubTab != null) _driversSubTab = driversSubTab;
@@ -124,10 +116,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           const SizedBox(height: 12),
           Text(
             message,
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontSize: 14,
-            ),
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
           ),
         ],
       ),
@@ -141,14 +130,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         title: const Text('Log Out?'),
         content: const Text('Are you sure you want to log out?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Log Out'),
           ),
@@ -159,23 +143,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     if (confirmed == true && context.mounted) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('adminLoggedIn', false);
-
       if (!context.mounted) return;
-
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(
-          builder: (context) => const AdminLoginScreen(),
-        ),
+        MaterialPageRoute(builder: (context) => const AdminLoginScreen()),
         (route) => false,
       );
     }
   }
 
-  Future<void> _updateDriverStatus(
-    String driverId,
-    String newStatus,
-  ) async {
+  Future<void> _updateDriverStatus(String driverId, String newStatus) async {
     await FirebaseFirestore.instance
         .collection('drivers')
         .doc(driverId)
@@ -184,43 +161,29 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     if (newStatus == 'approved') {
       await _notifyDriver(
         driverId,
-        'Sakay Tiker: Your driver application has been APPROVED. '
-        'You can now log in and start accepting rides.',
+        'Sakay Tiker: Your driver application has been APPROVED. You can now log in and start accepting rides.',
       );
     }
   }
 
-  /// Texts the driver through the SMS Worker.
-  /// If it cannot be sent, the admin gets a button to send it manually.
-  Future<void> _notifyDriver(
-    String driverId,
-    String message,
-  ) async {
+  /// Texts the driver through the SMS Worker. If it cannot be sent the admin gets a button to send it by hand.
+  Future<void> _notifyDriver(String driverId, String message) async {
     String? phone;
-
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('drivers')
-          .doc(driverId)
-          .get();
-
+      final doc = await FirebaseFirestore.instance.collection('drivers').doc(driverId).get();
       phone = doc.data()?['phoneNumber']?.toString();
     } catch (_) {}
 
     final sent = await SmsService.notifyDriver(driverId);
-
     if (!mounted) return;
 
     final number = phone;
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         duration: Duration(seconds: sent ? 4 : 10),
-        content: Text(
-          sent
-              ? 'Saved. The driver was notified by SMS.'
-              : 'Saved, but the SMS was not sent. You can text the driver yourself.',
-        ),
+        content: Text(sent
+            ? 'Saved. The driver was notified by SMS.'
+            : 'Saved, but the SMS was not sent. You can text the driver yourself.'),
         action: (!sent && number != null && number.isNotEmpty)
             ? SnackBarAction(
                 label: 'Text driver',
@@ -237,10 +200,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Future<void> _showRejectDialog(
-    BuildContext context,
-    String driverId,
-  ) async {
+  Future<void> _showRejectDialog(BuildContext context, String driverId) async {
     String? selectedReason;
     final notesController = TextEditingController();
 
@@ -255,28 +215,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Select a reason for rejecting this application:',
-                  ),
+                  const Text('Select a reason for rejecting this application:'),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     initialValue: selectedReason,
-                    decoration: const InputDecoration(
-                      labelText: 'Reason',
-                    ),
+                    decoration: const InputDecoration(labelText: 'Reason'),
                     items: _rejectionReasons
-                        .map(
-                          (r) => DropdownMenuItem(
-                            value: r,
-                            child: Text(r),
-                          ),
-                        )
+                        .map((r) => DropdownMenuItem(value: r, child: Text(r)))
                         .toList(),
-                    onChanged: (value) {
-                      setDialogState(() {
-                        selectedReason = value;
-                      });
-                    },
+                    onChanged: (value) => setDialogState(() => selectedReason = value),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -296,12 +243,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 child: const Text('Cancel'),
               ),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                ),
-                onPressed: selectedReason == null
-                    ? null
-                    : () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: selectedReason == null ? null : () => Navigator.pop(context, true),
                 child: const Text('Reject'),
               ),
             ],
@@ -313,24 +256,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     if (confirmed != true || selectedReason == null) return;
 
     final notes = notesController.text.trim();
+    final fullReason = notes.isEmpty ? selectedReason! : '$selectedReason — $notes';
 
-    final fullReason = notes.isEmpty
-        ? selectedReason!
-        : '$selectedReason — $notes';
-
-    await FirebaseFirestore.instance
-        .collection('drivers')
-        .doc(driverId)
-        .update({
+    await FirebaseFirestore.instance.collection('drivers').doc(driverId).update({
       'status': 'rejected',
       'rejectionReason': fullReason,
     });
 
     await _notifyDriver(
       driverId,
-      'Sakay Tiker: Your driver application was declined. '
-      'Reason: $fullReason. You can register again with clearer documents. '
-      'Questions? sakaytiker.support@gmail.com',
+      'Sakay Tiker: Your driver application was declined. Reason: $fullReason. You can register again with clearer documents. Questions? sakaytiker.support@gmail.com',
     );
   }
 
@@ -341,7 +276,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         child: Text('No photo uploaded'),
       );
     }
-
     return Image.network(
       url.toString(),
       errorBuilder: (_, _, _) => const Padding(
@@ -359,17 +293,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(
-            child: Text(
-              'Could not load applications: ${snapshot.error}',
-            ),
-          );
+          return Center(child: Text('Could not load applications: ${snapshot.error}'));
         }
-
         if (!snapshot.hasData) {
-          return const Center(
-            child: CircularProgressIndicator(),
-          );
+          return const Center(child: CircularProgressIndicator());
         }
 
         if (snapshot.data!.docs.isEmpty) {
@@ -388,7 +315,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(16.0),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -398,23 +325,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         children: [
                           Text(
                             data['fullName'] ?? 'Unknown',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 4),
                           Text('Address: ${data['address'] ?? '-'}'),
                           Text('Phone: ${data['phoneNumber'] ?? '-'}'),
-                          Text(
-                            'Email: ${(data['email'] ?? '').toString().isEmpty ? '-' : data['email']}',
-                          ),
-                          Text(
-                            'MTOP Number: ${data['mtopNumber'] ?? '-'}',
-                          ),
-                          Text(
-                            'Plate Number: ${data['plateNumber'] ?? '-'}',
-                          ),
+                          Text('Email: ${(data['email'] ?? '').toString().isEmpty ? '-' : data['email']}'),
+                          Text('MTOP Number: ${data['mtopNumber'] ?? '-'}'),
+                          Text('Plate Number: ${data['plateNumber'] ?? '-'}'),
                           const SizedBox(height: 8),
                           Wrap(
                             children: [
@@ -422,9 +340,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 onPressed: () => showDialog(
                                   context: context,
                                   builder: (_) => Dialog(
-                                    child: _docImage(
-                                      data['licenseFrontUrl'],
-                                    ),
+                                    child: _docImage(data['licenseFrontUrl']),
                                   ),
                                 ),
                                 child: const Text('View License Front'),
@@ -433,9 +349,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 onPressed: () => showDialog(
                                   context: context,
                                   builder: (_) => Dialog(
-                                    child: _docImage(
-                                      data['licenseBackUrl'],
-                                    ),
+                                    child: _docImage(data['licenseBackUrl']),
                                   ),
                                 ),
                                 child: const Text('View License Back'),
@@ -444,9 +358,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 onPressed: () => showDialog(
                                   context: context,
                                   builder: (_) => Dialog(
-                                    child: _docImage(
-                                      data['tricyclePhotoUrl'],
-                                    ),
+                                    child: _docImage(data['tricyclePhotoUrl']),
                                   ),
                                 ),
                                 child: const Text('View Tricycle Photo'),
@@ -459,28 +371,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     Column(
                       children: [
                         AnimatedPress(
-                          onTap: () => _updateDriverStatus(
-                            doc.id,
-                            'approved',
-                          ),
+                          onTap: () => _updateDriverStatus(doc.id, 'approved'),
                           child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                            ),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                             onPressed: () {},
                             child: const Text('Approve'),
                           ),
                         ),
                         const SizedBox(height: 8),
                         AnimatedPress(
-                          onTap: () => _showRejectDialog(
-                            context,
-                            doc.id,
-                          ),
+                          onTap: () => _showRejectDialog(context, doc.id),
                           child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                            ),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
                             onPressed: () {},
                             child: const Text('Reject'),
                           ),
@@ -497,28 +399,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // A driver counts as online only if they are marked online
-  // AND were active in the last 3 minutes.
+  // A driver counts as online only if they are marked online AND were active
+  // in the last 3 minutes (the driver app refreshes this while it is open).
   bool _isDriverOnline(Map<String, dynamic> data) {
     if (data['isOnline'] != true) return false;
-
     final lastActive = data['lastActiveAt'];
-
     if (lastActive is! Timestamp) return false;
-
-    return ServerClock.now()
-            .difference(lastActive.toDate())
-            .inSeconds <=
-        180;
+    return ServerClock.now().difference(lastActive.toDate()).inSeconds <= 180;
   }
 
-  Widget _buildSearchField(
-    TextEditingController controller,
-    String label,
-    ValueChanged<String> onChanged,
-  ) {
+  Widget _buildSearchField(TextEditingController controller, String label, ValueChanged<String> onChanged) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0),
       child: TextField(
         controller: controller,
         decoration: InputDecoration(
@@ -543,16 +435,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   // Helps spot why a driver is not counted as online.
   String _lastActiveText(Map<String, dynamic> data) {
     final v = data['lastActiveAt'];
-
     if (v is! Timestamp) return 'never';
-
     final secs = ServerClock.now().difference(v.toDate()).inSeconds;
-
     if (secs < 0) return 'just now';
     if (secs < 60) return '${secs}s ago';
     if (secs < 3600) return '${secs ~/ 60}m ago';
     if (secs < 86400) return '${secs ~/ 3600}h ago';
-
     return '${secs ~/ 86400}d ago';
   }
 
@@ -567,7 +455,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ),
         const SizedBox(height: 8),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: Wrap(
             spacing: 8,
             runSpacing: 4,
@@ -582,9 +470,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   label: Text(f[1]),
                   selected: _driverStatusFilter == f[0],
                   selectedColor: const Color(0xFFC8E6C9),
-                  onSelected: (_) {
-                    setState(() => _driverStatusFilter = f[0]);
-                  },
+                  onSelected: (_) => setState(() => _driverStatusFilter = f[0]),
                 ),
             ],
           ),
@@ -596,173 +482,96 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             builder: (context, ridesSnap) {
               // driverId -> month -> commission earned from completed rides
               final rideSums = <String, Map<String, num>>{};
-
-              for (final ride
-                  in ridesSnap.data?.docs ?? <QueryDocumentSnapshot>[]) {
+              for (final ride in ridesSnap.data?.docs ?? <QueryDocumentSnapshot>[]) {
                 final r = ride.data() as Map<String, dynamic>;
                 final driverId = r['driverId'];
                 final completedAt = r['completedAt'];
-
-                if (driverId is! String ||
-                    completedAt is! Timestamp) {
-                  continue;
-                }
-
+                if (driverId is! String || completedAt is! Timestamp) continue;
                 final d = completedAt.toDate();
-                final key =
-                    '${d.year}-${d.month.toString().padLeft(2, '0')}';
-
-                final months = rideSums.putIfAbsent(
-                  driverId,
-                  () => {},
-                );
-
-                months[key] = (months[key] ?? 0) +
-                    ((r['commissionAmount'] ?? 0) as num);
+                final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
+                final months = rideSums.putIfAbsent(driverId, () => {});
+                months[key] = (months[key] ?? 0) + ((r['commissionAmount'] ?? 0) as num);
               }
 
               return StreamBuilder<QuerySnapshot>(
-                stream: _driversStream,
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return Center(
-                      child: Text(
-                        'Could not load drivers: ${snapshot.error}',
-                      ),
-                    );
-                  }
+            stream: _driversStream,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(child: Text('Could not load drivers: ${snapshot.error}'));
+              }
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.data!.docs.isEmpty) {
+                return _buildEmptyState('No drivers found');
+              }
 
-                  if (!snapshot.hasData) {
-                    return const Center(
-                      child: CircularProgressIndicator(),
-                    );
-                  }
+              final query = _driverSearch.trim().toLowerCase();
+              final drivers = snapshot.data!.docs.where((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final name = (data['fullName'] ?? '').toString().toLowerCase();
+                final phone = (data['phoneNumber'] ?? '').toString().toLowerCase();
+                if (_driverStatusFilter != 'all' &&
+                    (data['status'] ?? '').toString().toLowerCase() != _driverStatusFilter) {
+                  return false;
+                }
+                return name.contains(query) || phone.contains(query);
+              }).toList();
 
-                  if (snapshot.data!.docs.isEmpty) {
-                    return _buildEmptyState('No drivers found');
-                  }
+              if (drivers.isEmpty) return _buildEmptyState('No matching drivers');
 
-                  final query = _driverSearch.trim().toLowerCase();
-
-                  final drivers = snapshot.data!.docs.where((doc) {
+              return _scrollableTable(
+                countText: (query.isEmpty && _driverStatusFilter == 'all')
+                    ? 'Total drivers: ${drivers.length}'
+                    : 'Showing ${drivers.length} of ${snapshot.data!.docs.length} drivers',
+                DataTable(
+                  columns: const [
+                    DataColumn(label: Text('#')),
+                    DataColumn(label: Text('Name')),
+                    DataColumn(label: Text('Phone')),
+                    DataColumn(label: Text('Email')),
+                    DataColumn(label: Text('Status')),
+                    DataColumn(label: Text('Account')),
+                    DataColumn(label: Text('Online')),
+                    DataColumn(label: Text('Last Active')),
+                    DataColumn(label: Text('No-Shows')),
+                    DataColumn(label: Text('Cancellations')),
+                    DataColumn(label: Text('Commission Owed')),
+                  ],
+                  rows: drivers.asMap().entries.map((entry) {
+                    final doc = entry.value;
                     final data = doc.data() as Map<String, dynamic>;
-                    final name = (data['fullName'] ?? '')
-                        .toString()
-                        .toLowerCase();
-                    final phone = (data['phoneNumber'] ?? '')
-                        .toString()
-                        .toLowerCase();
-
-                    if (_driverStatusFilter != 'all' &&
-                        (data['status'] ?? '')
-                                .toString()
-                                .toLowerCase() !=
-                            _driverStatusFilter) {
-                      return false;
-                    }
-
-                    return name.contains(query) ||
-                        phone.contains(query);
-                  }).toList();
-
-                  if (drivers.isEmpty) {
-                    return _buildEmptyState('No matching drivers');
-                  }
-
-                  return _scrollableTable(
-                    countText: (query.isEmpty &&
-                            _driverStatusFilter == 'all')
-                        ? 'Total drivers: ${drivers.length}'
-                        : 'Showing ${drivers.length} of ${snapshot.data!.docs.length} drivers',
-                    DataTable(
-                      columns: const [
-                        DataColumn(label: Text('#')),
-                        DataColumn(label: Text('Name')),
-                        DataColumn(label: Text('Phone')),
-                        DataColumn(label: Text('Email')),
-                        DataColumn(label: Text('Status')),
-                        DataColumn(label: Text('Account')),
-                        DataColumn(label: Text('Online')),
-                        DataColumn(label: Text('Last Active')),
-                        DataColumn(label: Text('No-Shows')),
-                        DataColumn(label: Text('Cancellations')),
-                        DataColumn(label: Text('Commission Owed')),
-                      ],
-                      rows: drivers.asMap().entries.map((entry) {
-                        final doc = entry.value;
-                        final data =
-                            doc.data() as Map<String, dynamic>;
-                        final cancels =
-                            (data['cancelCount'] ?? 0) as num;
-                        final online = _isDriverOnline(data);
-
-                        return DataRow(
-                          key: ValueKey(doc.id),
-                          cells: [
-                            DataCell(Text('${entry.key + 1}')),
-                            DataCell(
-                              Text('${data['fullName'] ?? '-'}'),
-                            ),
-                            DataCell(
-                              Text('${data['phoneNumber'] ?? '-'}'),
-                            ),
-                            DataCell(
-                              Text(
-                                (data['email'] ?? '').toString().isEmpty
-                                    ? '-'
-                                    : '${data['email']}',
-                              ),
-                            ),
-                            DataCell(
-                              Text('${data['status'] ?? '-'}'),
-                            ),
-                            DataCell(
-                              Text(
-                                '${data['accountStatus'] ?? 'active'}',
-                              ),
-                            ),
-                            DataCell(
-                              Text(
-                                online ? 'Yes' : 'No',
-                                style: TextStyle(
-                                  color: online
-                                      ? Colors.green.shade700
-                                      : null,
-                                  fontWeight: online
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                            ),
-                            DataCell(Text(_lastActiveText(data))),
-                            DataCell(
-                              Text('${data['noShowCount'] ?? 0}'),
-                            ),
-                            DataCell(
-                              Text(
-                                '$cancels',
-                                style: TextStyle(
-                                  fontWeight: cancels >= 3
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                  color: cancels >= 3
-                                      ? Colors.red
-                                      : null,
-                                ),
-                              ),
-                            ),
-                            DataCell(
-                              _CommissionOwedCell(
-                                driverId: doc.id,
-                                rideMonths: rideSums[doc.id] ?? const {},
-                              ),
-                            ),
-                          ],
-                        );
-                      }).toList(),
-                    ),
-                  );
-                },
+                    final cancels = (data['cancelCount'] ?? 0) as num;
+                    final online = _isDriverOnline(data);
+                    return DataRow(key: ValueKey(doc.id), cells: [
+                      DataCell(Text('${entry.key + 1}')),
+                      DataCell(Text('${data['fullName'] ?? '-'}')),
+                      DataCell(Text('${data['phoneNumber'] ?? '-'}')),
+                      DataCell(Text((data['email'] ?? '').toString().isEmpty ? '-' : '${data['email']}')),
+                      DataCell(Text('${data['status'] ?? '-'}')),
+                      DataCell(Text('${data['accountStatus'] ?? 'active'}')),
+                      DataCell(Text(
+                        online ? 'Yes' : 'No',
+                        style: TextStyle(
+                          color: online ? Colors.green.shade700 : null,
+                          fontWeight: online ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      )),
+                      DataCell(Text(_lastActiveText(data))),
+                      DataCell(Text('${data['noShowCount'] ?? 0}')),
+                      DataCell(Text(
+                        '$cancels',
+                        style: TextStyle(
+                          fontWeight: cancels >= 3 ? FontWeight.bold : FontWeight.normal,
+                          color: cancels >= 3 ? Colors.red : null,
+                        ),
+                      )),
+                      DataCell(_CommissionOwedCell(driverId: doc.id, rideMonths: rideSums[doc.id] ?? const {})),
+                    ]);
+                  }).toList(),
+                ),
+              );
+            },
               );
             },
           ),
@@ -771,11 +580,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // Lets wide tables scroll sideways as well as up/down.
-  Widget _scrollableTable(
-    Widget table, {
-    String? countText,
-  }) {
+  // Lets wide tables scroll sideways as well as up/down (prevents overflow errors).
+  Widget _scrollableTable(Widget table, {String? countText}) {
     return Scrollbar(
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -787,10 +593,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
                   countText,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1B5E20),
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
                 ),
               ),
             SingleChildScrollView(
@@ -803,72 +606,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // DRIVERS TAB
-  // The Pending button displays a live red count from Firestore.
   Widget _buildDriversTab() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: SegmentedButton<int>(
-            // Not const because the Pending label updates live.
-            segments: [
-              ButtonSegment<int>(
-                value: 0,
-                label: StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('drivers')
-                      .where('status', isEqualTo: 'pending')
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    final pendingCount =
-                        snapshot.data?.docs.length ?? 0;
-
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text('Pending'),
-                        if (pendingCount > 0) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7,
-                              vertical: 3,
-                            ),
-                            decoration: const BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Text(
-                              '$pendingCount',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    );
-                  },
-                ),
-              ),
-              const ButtonSegment<int>(
-                value: 1,
-                label: Text('All Drivers'),
-              ),
-              const ButtonSegment<int>(
-                value: 2,
-                label: Text('Commission'),
-              ),
+            segments: const [
+              ButtonSegment(value: 0, label: Text('Pending')),
+              ButtonSegment(value: 1, label: Text('All Drivers')),
+              ButtonSegment(value: 2, label: Text('Commission')),
             ],
             selected: {_driversSubTab},
             onSelectionChanged: (newSelection) {
-              setState(() {
-                _driversSubTab = newSelection.first;
-              });
+              setState(() => _driversSubTab = newSelection.first);
             },
           ),
         ),
@@ -888,67 +640,47 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('rides')
-          .where(
-            'status',
-            whereIn: ['pending', 'negotiating', 'accepted'],
-          )
+          .where('status', whereIn: ['pending', 'negotiating', 'accepted'])
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(
-            child: Text('Could not load rides: ${snapshot.error}'),
-          );
+          return Center(child: Text('Could not load rides: ${snapshot.error}'));
         }
 
         if (!snapshot.hasData) {
-          return const Center(
-            child: CircularProgressIndicator(),
-          );
+          return const Center(child: CircularProgressIndicator());
         }
 
-        if (snapshot.data!.docs.isEmpty) {
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
           return _buildEmptyState('No ongoing rides right now');
         }
 
-        final rides = _sortNewestFirst(
-          snapshot.data!.docs,
-          'createdAt',
-        ).where((d) {
+        final rides = _sortNewestFirst(snapshot.data!.docs, 'createdAt').where((d) {
           final data = d.data() as Map<String, dynamic>;
           final created = data['createdAt'];
-
           // Hide requests nobody accepted within 15 minutes.
           if (data['status'] == 'pending' && created is Timestamp) {
-            return DateTime.now()
-                    .difference(created.toDate())
-                    .inMinutes <
-                15;
+            return DateTime.now().difference(created.toDate()).inMinutes < 15;
           }
-
           return true;
         }).toList();
 
-        if (rides.isEmpty) {
-          return _buildEmptyState('No ongoing rides right now');
-        }
+        if (rides.isEmpty) return _buildEmptyState('No ongoing rides right now');
 
         return ListView.builder(
           padding: const EdgeInsets.all(16),
           itemCount: rides.length,
           itemBuilder: (context, index) {
-            final data =
-                rides[index].data() as Map<String, dynamic>;
+            final data = rides[index].data() as Map<String, dynamic>;
             final status = (data['status'] ?? 'pending').toString();
 
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
               color: status == 'accepted'
                   ? Colors.green.shade50
-                  : (status == 'negotiating'
-                      ? Colors.blue.shade50
-                      : Colors.orange.shade50),
+                  : (status == 'negotiating' ? Colors.blue.shade50 : Colors.orange.shade50),
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(16.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -958,25 +690,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         Text(
                           status == 'accepted'
                               ? 'ONGOING'
-                              : (status == 'negotiating'
-                                  ? 'NEGOTIATING FARE'
-                                  : 'WAITING FOR DRIVER'),
+                              : (status == 'negotiating' ? 'NEGOTIATING FARE' : 'WAITING FOR DRIVER'),
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: status == 'accepted'
                                 ? Colors.green.shade800
-                                : (status == 'negotiating'
-                                    ? Colors.blue.shade800
-                                    : Colors.orange.shade800),
+                                : (status == 'negotiating' ? Colors.blue.shade800 : Colors.orange.shade800),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      'Passenger: ${data['passengerName'] ?? '-'} '
-                      '(${data['passengerPhone'] ?? '-'})',
-                    ),
+                    Text('Passenger: ${data['passengerName'] ?? '-'} (${data['passengerPhone'] ?? '-'})'),
                     Text('Type: ${data['passengerType'] ?? 'Regular'}'),
                     Text('Passengers: ${data['passengerCount'] ?? 1}'),
                     Text('Pickup: ${data['pickupLocation'] ?? '-'}'),
@@ -985,20 +710,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       Text('Passenger offered: ₱${data['offeredFare']}'),
                     if (status == 'negotiating')
                       Text(
-                        'Counter offer: ₱${data['counterFare'] ?? '-'} '
-                        'from ${data['negotiatingDriverName'] ?? '-'} '
-                        '(${data['negotiatingDriverPhone'] ?? '-'})',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
+                        'Counter offer: ₱${data['counterFare'] ?? '-'} from ${data['negotiatingDriverName'] ?? '-'} (${data['negotiatingDriverPhone'] ?? '-'})',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                     if (status == 'accepted') ...[
                       Text(
-                        'Driver: ${data['driverName'] ?? '-'} '
-                        '(${data['driverPhone'] ?? '-'})',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
+                        'Driver: ${data['driverName'] ?? '-'} (${data['driverPhone'] ?? '-'})',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       if (data['agreedFare'] != null)
                         Text('Agreed fare: ₱${data['agreedFare']}'),
@@ -1018,39 +736,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final today = DateTime(now.year, now.month, now.day);
     final day = DateTime(d.year, d.month, d.day);
     final diff = today.difference(day).inDays;
-
-    final text =
-        '${_weekday(d.weekday)}, ${_month(d.month)} ${d.day}, ${d.year}';
-
+    final text = '${_weekday(d.weekday)}, ${_month(d.month)} ${d.day}, ${d.year}';
     if (diff == 0) return 'Today - $text';
     if (diff == 1) return 'Yesterday - $text';
-
     return text;
   }
 
   String _timeLabel(DateTime d) {
     final hour = d.hour % 12 == 0 ? 12 : d.hour % 12;
     final minute = d.minute.toString().padLeft(2, '0');
-
     return '$hour:$minute ${d.hour >= 12 ? 'PM' : 'AM'}';
   }
 
-  List<QueryDocumentSnapshot> _sortNewestFirst(
-    List<QueryDocumentSnapshot> docs,
-    String field,
-  ) {
+  List<QueryDocumentSnapshot> _sortNewestFirst(List<QueryDocumentSnapshot> docs, String field) {
     final list = List<QueryDocumentSnapshot>.from(docs);
-
     DateTime time(QueryDocumentSnapshot d) {
       final v = (d.data() as Map<String, dynamic>)[field];
-
-      return v is Timestamp
-          ? v.toDate()
-          : DateTime.fromMillisecondsSinceEpoch(0);
+      return v is Timestamp ? v.toDate() : DateTime.fromMillisecondsSinceEpoch(0);
     }
-
     list.sort((a, b) => time(b).compareTo(time(a)));
-
     return list;
   }
 
@@ -1069,56 +773,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             stream: _completedRidesStream,
             builder: (context, snapshot) {
               if (snapshot.hasError) {
-                return Center(
-                  child: Text(
-                    'Could not load rides: ${snapshot.error}',
-                  ),
-                );
+                return Center(child: Text('Could not load rides: ${snapshot.error}'));
               }
-
               if (!snapshot.hasData) {
-                return const Center(
-                  child: CircularProgressIndicator(),
-                );
+                return const Center(child: CircularProgressIndicator());
               }
-
               if (snapshot.data!.docs.isEmpty) {
                 return _buildEmptyState('No completed rides yet');
               }
 
               final query = _rideHistorySearch.trim().toLowerCase();
-
-              final rides = _sortNewestFirst(
-                snapshot.data!.docs,
-                'completedAt',
-              ).where((doc) {
+              final rides = _sortNewestFirst(snapshot.data!.docs, 'completedAt').where((doc) {
                 final data = doc.data() as Map<String, dynamic>;
-                final passenger = (data['passengerName'] ?? '')
-                    .toString()
-                    .toLowerCase();
-                final driver = (data['driverName'] ?? '')
-                    .toString()
-                    .toLowerCase();
-
-                return passenger.contains(query) ||
-                    driver.contains(query);
+                final passenger = (data['passengerName'] ?? '').toString().toLowerCase();
+                final driver = (data['driverName'] ?? '').toString().toLowerCase();
+                return passenger.contains(query) || driver.contains(query);
               }).toList();
 
-              if (rides.isEmpty) {
-                return _buildEmptyState('No matching rides');
-              }
+              if (rides.isEmpty) return _buildEmptyState('No matching rides');
 
               // Group the rides by the day they were completed.
               final groups = <String, List<QueryDocumentSnapshot>>{};
-
               for (final doc in rides) {
                 final data = doc.data() as Map<String, dynamic>;
                 final ts = data['completedAt'];
-
-                final key = ts is Timestamp
-                    ? _dateLabel(ts.toDate())
-                    : 'Unknown date';
-
+                final key = ts is Timestamp ? _dateLabel(ts.toDate()) : 'Unknown date';
                 groups.putIfAbsent(key, () => []).add(doc);
               }
 
@@ -1132,37 +811,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         query.isEmpty
                             ? 'Total completed rides: ${rides.length}'
                             : 'Showing ${rides.length} of ${snapshot.data!.docs.length} rides',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF1B5E20),
-                        ),
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
                       ),
                     ),
                     for (final entry in groups.entries) ...[
                       Container(
                         width: double.infinity,
                         margin: const EdgeInsets.only(top: 8),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
                           color: const Color(0xFFDDEEDF),
                           borderRadius: BorderRadius.circular(8),
-                          border: const Border(
-                            left: BorderSide(
-                              color: Color(0xFF1B5E20),
-                              width: 5,
-                            ),
-                          ),
+                          border: const Border(left: BorderSide(color: Color(0xFF1B5E20), width: 5)),
                         ),
                         child: Text(
-                          '${entry.key}  ·  ${entry.value.length} '
-                          'ride${entry.value.length == 1 ? '' : 's'}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1B5E20),
-                          ),
+                          '${entry.key}  ·  ${entry.value.length} ride${entry.value.length == 1 ? '' : 's'}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
                         ),
                       ),
                       SingleChildScrollView(
@@ -1182,59 +846,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           ],
                           rows: entry.value.asMap().entries.map((e) {
                             final doc = e.value;
-                            final data =
-                                doc.data() as Map<String, dynamic>;
+                            final data = doc.data() as Map<String, dynamic>;
                             final ts = data['completedAt'];
-
-                            return DataRow(
-                              key: ValueKey(doc.id),
-                              cells: [
-                                DataCell(Text('${e.key + 1}')),
-                                DataCell(
-                                  Text(
-                                    ts is Timestamp
-                                        ? _timeLabel(ts.toDate())
-                                        : '-',
-                                  ),
-                                ),
-                                DataCell(
-                                  Text('${data['passengerName'] ?? '-'}'),
-                                ),
-                                DataCell(
-                                  Text(
-                                    '${data['passengerType'] ?? 'Regular'}',
-                                  ),
-                                ),
-                                DataCell(
-                                  Text('${data['driverName'] ?? '-'}'),
-                                ),
-                                DataCell(
-                                  Text('${data['pickupLocation'] ?? '-'}'),
-                                ),
-                                DataCell(
-                                  Text('${data['dropoffLocation'] ?? '-'}'),
-                                ),
-                                DataCell(
-                                  Text(
-                                    data['fare'] != null
-                                        ? '₱${data['fare']}'
-                                        : '-',
-                                  ),
-                                ),
-                                DataCell(
-                                  Text(
-                                    data['isNegotiated'] == true
-                                        ? 'Yes'
-                                        : 'No',
-                                  ),
-                                ),
-                                DataCell(
-                                  Text(
-                                    '₱${data['commissionAmount'] ?? 0}',
-                                  ),
-                                ),
-                              ],
-                            );
+                            return DataRow(key: ValueKey(doc.id), cells: [
+                              DataCell(Text('${e.key + 1}')),
+                              DataCell(Text(ts is Timestamp ? _timeLabel(ts.toDate()) : '-')),
+                              DataCell(Text('${data['passengerName'] ?? '-'}')),
+                              DataCell(Text('${data['passengerType'] ?? 'Regular'}')),
+                              DataCell(Text('${data['driverName'] ?? '-'}')),
+                              DataCell(Text('${data['pickupLocation'] ?? '-'}')),
+                              DataCell(Text('${data['dropoffLocation'] ?? '-'}')),
+                              DataCell(Text(data['fare'] != null ? '₱${data['fare']}' : '-')),
+                              DataCell(Text(data['isNegotiated'] == true ? 'Yes' : 'No')),
+                              DataCell(Text('₱${data['commissionAmount'] ?? 0}')),
+                            ]);
                           }).toList(),
                         ),
                       ),
@@ -1255,31 +880,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: SegmentedButton<int>(
             segments: const [
-              ButtonSegment(
-                value: 0,
-                label: Text('Ongoing'),
-              ),
-              ButtonSegment(
-                value: 1,
-                label: Text('History'),
-              ),
+              ButtonSegment(value: 0, label: Text('Ongoing')),
+              ButtonSegment(value: 1, label: Text('History')),
             ],
             selected: {_ridesSubTab},
             onSelectionChanged: (newSelection) {
-              setState(() {
-                _ridesSubTab = newSelection.first;
-              });
+              setState(() => _ridesSubTab = newSelection.first);
             },
           ),
         ),
         const SizedBox(height: 12),
         Expanded(
-          child: _ridesSubTab == 0
-              ? _buildOngoingRides()
-              : _buildRideHistory(),
+          child: _ridesSubTab == 0 ? _buildOngoingRides() : _buildRideHistory(),
         ),
       ],
     );
@@ -1303,35 +918,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   String _weekday(int day) {
-    const days = [
-      'Mon',
-      'Tue',
-      'Wed',
-      'Thu',
-      'Fri',
-      'Sat',
-      'Sun',
-    ];
-
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return days[day - 1];
   }
 
   String _month(int month) {
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return months[month - 1];
   }
 
@@ -1347,10 +939,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFF1B5E20),
-                  Color(0xFF2E7D32),
-                ],
+                colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
               ),
             ),
           ),
@@ -1361,21 +950,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             child: MountainSilhouette(height: 12),
           ),
           Padding(
-            padding: EdgeInsets.fromLTRB(
-              compact ? 8 : 24,
-              0,
-              compact ? 8 : 24,
-              8,
-            ),
+            padding: EdgeInsets.fromLTRB(compact ? 8 : 24, 0, compact ? 8 : 24, 8),
             child: Row(
               children: [
                 if (compact)
                   Builder(
                     builder: (ctx) => IconButton(
-                      icon: const Icon(
-                        Icons.menu,
-                        color: Colors.white,
-                      ),
+                      icon: const Icon(Icons.menu, color: Colors.white),
                       tooltip: 'Menu',
                       onPressed: () => Scaffold.of(ctx).openDrawer(),
                     ),
@@ -1386,49 +967,41 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     color: Colors.white,
                     shape: BoxShape.circle,
                   ),
-                  child: Image.asset(
-                    'assets/images/logo.png',
-                    height: compact ? 32 : 40,
-                  ),
+                  child: Image.asset('assets/images/logo.png', height: compact ? 32 : 40),
                 ),
                 SizedBox(width: compact ? 10 : 14),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Sakay Tiker Admin',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: compact ? 16 : 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (!compact) ...[
+                      const SizedBox(height: 1),
                       Text(
-                        'Sakay Tiker Admin',
+                        'Central Bontoc, Mountain Province',
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: Colors.white,
-                          fontSize: compact ? 16 : 20,
-                          fontWeight: FontWeight.bold,
+                          color: Colors.white.withValues(alpha: 0.85),
+                          fontSize: 12,
                         ),
                       ),
-                      if (!compact) ...[
-                        const SizedBox(height: 1),
-                        Text(
-                          'Central Bontoc, Mountain Province',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.85),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
                     ],
+                  ],
                   ),
                 ),
                 if (!compact) ...[
                   Text(
-                    '${_weekday(DateTime.now().weekday)}, '
-                    '${_month(DateTime.now().month)} ${DateTime.now().day}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
+                    '${_weekday(DateTime.now().weekday)}, ${_month(DateTime.now().month)} ${DateTime.now().day}',
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
                   ),
                   Container(
                     height: 24,
@@ -1437,31 +1010,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     margin: const EdgeInsets.symmetric(horizontal: 12),
                   ),
                 ],
-
-                // Header notification badge.
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('drivers')
                       .where('status', isEqualTo: 'pending')
                       .snapshots(),
                   builder: (context, snapshot) {
-                    final pendingDrivers =
-                        snapshot.data?.docs.length ?? 0;
-
+                    final pendingDrivers = snapshot.data?.docs.length ?? 0;
                     return StreamBuilder<QuerySnapshot>(
                       stream: FirebaseFirestore.instance
                           .collection('drivers')
-                          .where(
-                            'commissionPaymentPending',
-                            isEqualTo: true,
-                          )
+                          .where('commissionPaymentPending', isEqualTo: true)
                           .snapshots(),
                       builder: (context, paySnapshot) {
-                        final pendingPayments =
-                            paySnapshot.data?.docs.length ?? 0;
-
+                        final pendingPayments = paySnapshot.data?.docs.length ?? 0;
                         final count = pendingDrivers + pendingPayments;
-
                         return Padding(
                           padding: EdgeInsets.zero,
                           child: Stack(
@@ -1471,32 +1034,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 tooltip: 'Notifications',
                                 iconSize: 24,
                                 padding: const EdgeInsets.all(8),
-                                icon: const Icon(
-                                  Icons.notifications_outlined,
-                                  color: Colors.white,
-                                ),
-                                onSelected: (tab) {
-                                  _navigateTo(
-                                    1,
-                                    driversSubTab: tab,
-                                  );
-                                },
+                                icon: const Icon(Icons.notifications_outlined, color: Colors.white),
+                                onSelected: (tab) => _navigateTo(1, driversSubTab: tab),
                                 itemBuilder: (context) => [
                                   if (pendingDrivers > 0)
                                     PopupMenuItem(
                                       value: 0,
-                                      child: Text(
-                                        '$pendingDrivers driver registration'
-                                        '${pendingDrivers == 1 ? '' : 's'} to review',
-                                      ),
+                                      child: Text('$pendingDrivers driver registration${pendingDrivers == 1 ? '' : 's'} to review'),
                                     ),
                                   if (pendingPayments > 0)
                                     PopupMenuItem(
                                       value: 2,
-                                      child: Text(
-                                        '$pendingPayments commission payment'
-                                        '${pendingPayments == 1 ? '' : 's'} to verify',
-                                      ),
+                                      child: Text('$pendingPayments commission payment${pendingPayments == 1 ? '' : 's'} to verify'),
                                     ),
                                   if (count == 0)
                                     const PopupMenuItem(
@@ -1513,21 +1062,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                   child: IgnorePointer(
                                     child: Container(
                                       padding: const EdgeInsets.all(3),
-                                      decoration: const BoxDecoration(
-                                        color: Colors.red,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      constraints: const BoxConstraints(
-                                        minWidth: 16,
-                                        minHeight: 16,
-                                      ),
+                                      decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
                                       child: Text(
                                         '$count',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                        ),
+                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                                         textAlign: TextAlign.center,
                                       ),
                                     ),
@@ -1544,28 +1083,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   tooltip: 'Change password',
                   iconSize: 24,
                   padding: const EdgeInsets.all(8),
-                  constraints: const BoxConstraints(
-                    minWidth: 40,
-                    minHeight: 40,
-                  ),
-                  icon: const Icon(
-                    Icons.key,
-                    color: Colors.white,
-                  ),
+                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                  icon: const Icon(Icons.key, color: Colors.white),
                   onPressed: () => showChangePasswordDialog(context),
                 ),
                 IconButton(
                   tooltip: 'Logout',
                   iconSize: 24,
                   padding: const EdgeInsets.all(8),
-                  constraints: const BoxConstraints(
-                    minWidth: 40,
-                    minHeight: 40,
-                  ),
-                  icon: const Icon(
-                    Icons.logout,
-                    color: Colors.white,
-                  ),
+                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                  icon: const Icon(Icons.logout, color: Colors.white),
                   onPressed: () => _confirmLogout(context),
                 ),
               ],
@@ -1584,107 +1111,47 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         children: [
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              itemCount: _navItems.length,
-              itemBuilder: (context, index) {
-                final item = _navItems[index];
-                final selected = _selectedIndex == index;
-
-                return Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 3,
-                  ),
-                  child: Material(
-                    color: selected
-                        ? const Color(0xFF1B5E20)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(10),
-                      onTap: () {
-                        setState(() => _selectedIndex = index);
-                        if (inDrawer) Navigator.pop(context);
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 13,
-                          horizontal: 16,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              item['icon'] as IconData,
-                              color: selected
-                                  ? Colors.white
-                                  : const Color(0xFF1B5E20),
-                              size: 22,
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Text(
-                                item['label'] as String,
-                                style: TextStyle(
-                                  color: selected
-                                      ? Colors.white
-                                      : const Color(0xFF1B3A22),
-                                  fontWeight: selected
-                                      ? FontWeight.bold
-                                      : FontWeight.w500,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ),
-
-                            // RED COUNT BESIDE DRIVERS IN THE SIDEBAR.
-                            if (index == 1)
-                              StreamBuilder<QuerySnapshot>(
-                                stream: FirebaseFirestore.instance
-                                    .collection('drivers')
-                                    .where(
-                                      'status',
-                                      isEqualTo: 'pending',
-                                    )
-                                    .snapshots(),
-                                builder: (context, snapshot) {
-                                  final pendingCount =
-                                      snapshot.data?.docs.length ?? 0;
-
-                                  if (pendingCount == 0) {
-                                    return const SizedBox.shrink();
-                                  }
-
-                                  return Container(
-                                    constraints: const BoxConstraints(
-                                      minWidth: 22,
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 3,
-                                    ),
-                                    decoration: const BoxDecoration(
-                                      color: Colors.red,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    alignment: Alignment.center,
-                                    child: Text(
-                                      '$pendingCount',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                          ],
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        itemCount: _navItems.length,
+        itemBuilder: (context, index) {
+          final item = _navItems[index];
+          final selected = _selectedIndex == index;
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            child: Material(
+              color: selected ? const Color(0xFF1B5E20) : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () {
+                  setState(() => _selectedIndex = index);
+                  if (inDrawer) Navigator.pop(context);
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+                  child: Row(
+                    children: [
+                      Icon(
+                        item['icon'] as IconData,
+                        color: selected ? Colors.white : const Color(0xFF1B5E20),
+                        size: 22,
+                      ),
+                      const SizedBox(width: 14),
+                      Text(
+                        item['label'] as String,
+                        style: TextStyle(
+                          color: selected ? Colors.white : const Color(0xFF1B3A22),
+                          fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                          fontSize: 14,
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                );
-              },
+                ),
+              ),
+            ),
+          );
+        },
             ),
           ),
           const VersionLabel(prefix: 'Sakay Tiker Admin'),
@@ -1698,16 +1165,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // On a phone-sized screen, the side menu becomes a drawer.
+        // On a phone-sized screen the side menu becomes a slide-out drawer.
         final narrow = constraints.maxWidth < 800;
-
         return Scaffold(
           drawer: narrow
               ? Drawer(
                   backgroundColor: const Color(0xFFEAF5EC),
-                  child: SafeArea(
-                    child: _buildSidebar(inDrawer: true),
-                  ),
+                  child: SafeArea(child: _buildSidebar(inDrawer: true)),
                 )
               : null,
           body: Column(
@@ -1725,9 +1189,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Padding(
-                            padding: EdgeInsets.all(
-                              narrow ? 12 : 16,
-                            ),
+                            padding: EdgeInsets.all(narrow ? 12.0 : 16.0),
                             child: Text(
                               _pages[_selectedIndex],
                               style: TextStyle(
@@ -1737,9 +1199,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               ),
                             ),
                           ),
-                          Expanded(
-                            child: _getSelectedPage(),
-                          ),
+                          Expanded(child: _getSelectedPage()),
                         ],
                       ),
                     ),
@@ -1754,20 +1214,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 }
 
+
 /// Shows the total unpaid commission across all months for one driver.
-/// Keeps its own stream so the table can rebuild without flicker.
+/// Keeps its own stream so the table can rebuild (e.g. while searching) without flicker.
 class _CommissionOwedCell extends StatefulWidget {
   final String driverId;
   final Map<String, num> rideMonths;
-
-  const _CommissionOwedCell({
-    required this.driverId,
-    required this.rideMonths,
-  });
+  const _CommissionOwedCell({required this.driverId, required this.rideMonths});
 
   @override
-  State<_CommissionOwedCell> createState() =>
-      _CommissionOwedCellState();
+  State<_CommissionOwedCell> createState() => _CommissionOwedCellState();
 }
 
 class _CommissionOwedCellState extends State<_CommissionOwedCell> {
@@ -1782,38 +1238,26 @@ class _CommissionOwedCellState extends State<_CommissionOwedCell> {
     return StreamBuilder<QuerySnapshot>(
       stream: _stream,
       builder: (context, snapshot) {
-        // Per month, use the higher of the saved record and completed rides.
+        // Per month, use the higher of the saved record and the completed rides.
         final earned = <String, num>{};
         final paid = <String, num>{};
-
-        for (final record
-            in snapshot.data?.docs ?? <QueryDocumentSnapshot>[]) {
+        for (final record in snapshot.data?.docs ?? <QueryDocumentSnapshot>[]) {
           final r = record.data() as Map<String, dynamic>;
-
           earned[record.id] = (r['totalEarned'] ?? 0) as num;
           paid[record.id] = (r['amountPaid'] ?? 0) as num;
         }
-
         widget.rideMonths.forEach((month, rideTotal) {
-          if (rideTotal > (earned[month] ?? 0)) {
-            earned[month] = rideTotal;
-          }
+          if (rideTotal > (earned[month] ?? 0)) earned[month] = rideTotal;
         });
-
         num owed = 0;
-
         earned.forEach((month, e) {
-          final balance = e - (paid[month] ?? 0);
-
-          if (balance > 0) owed += balance;
+          final b = e - (paid[month] ?? 0);
+          if (b > 0) owed += b;
         });
-
         return Text(
           '₱$owed',
           style: TextStyle(
-            fontWeight: owed > 0
-                ? FontWeight.bold
-                : FontWeight.normal,
+            fontWeight: owed > 0 ? FontWeight.bold : FontWeight.normal,
             color: owed > 0 ? Colors.red : null,
           ),
         );
