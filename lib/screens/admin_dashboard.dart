@@ -14,6 +14,8 @@ import '../widgets/animated_press.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../utils/sms_service.dart';
 import 'admin_account_dialogs.dart';
+import 'admin_ban_cell.dart';
+import 'commission_period.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -39,26 +41,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       .where('status', isEqualTo: 'completed')
       .snapshots();
 
-  // Live streams used only for the red number badges.
-  final Stream<QuerySnapshot> _pendingDriversStream = FirebaseFirestore.instance
-      .collection('drivers')
-      .where('status', isEqualTo: 'pending')
-      .snapshots();
-  final Stream<QuerySnapshot> _pendingPaymentsStream = FirebaseFirestore.instance
-      .collection('drivers')
-      .where('commissionPaymentPending', isEqualTo: true)
-      .snapshots();
-  final Stream<QuerySnapshot> _ongoingRidesStream = FirebaseFirestore.instance
+  // Ride history shows finished rides: completed, cancelled by the passenger, and no-shows.
+  final Stream<QuerySnapshot> _historyRidesStream = FirebaseFirestore.instance
       .collection('rides')
-      .where('status', whereIn: ['pending', 'negotiating', 'accepted'])
+      .where('status', whereIn: ['completed', 'cancelled', 'no_show'])
       .snapshots();
-  final Stream<QuerySnapshot> _rideFeedbackStream =
-      FirebaseFirestore.instance.collection('ride_feedback').snapshots();
-  final Stream<QuerySnapshot> _appFeedbackStream =
-      FirebaseFirestore.instance.collection('app_feedback').snapshots();
-
-  // When the admin last looked at the Feedback page. Newer feedback counts as "new".
-  DateTime? _feedbackLastSeen;
+  String _historyFilter = 'all'; // all, completed, cancelled, no_show
 
   final _driverSearchController = TextEditingController();
   final _rideHistorySearchController = TextEditingController();
@@ -90,11 +78,163 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Timer? _refreshTimer;
 
+  // ---- Live counts for the red badges ----
+  final List<StreamSubscription> _badgeSubs = [];
+  int _pendingDriverCount = 0;
+  int _pendingPaymentCount = 0;
+  List<Map<String, dynamic>> _activeRides = [];
+  List<DateTime> _rideFeedbackTimes = [];
+  List<DateTime> _appFeedbackTimes = [];
+  bool _rideFeedbackLoaded = false;
+  bool _appFeedbackLoaded = false;
+  int? _feedbackSeenMs; // newest feedback the admin has already looked at
+
+  // Requests nobody accepted within 15 minutes are not counted as ongoing.
+  int get _ongoingRideCount => _activeRides.where((data) {
+        final created = data['createdAt'];
+        if (data['status'] == 'pending' && created is Timestamp) {
+          return DateTime.now().difference(created.toDate()).inMinutes < 15;
+        }
+        return true;
+      }).length;
+
+  int get _unseenFeedbackCount {
+    final seen = _feedbackSeenMs;
+    if (seen == null) return 0;
+    return [..._rideFeedbackTimes, ..._appFeedbackTimes]
+        .where((t) => t.millisecondsSinceEpoch > seen)
+        .length;
+  }
+
+  int get _driversBadgeCount => _pendingDriverCount + _pendingPaymentCount;
+
+  DateTime? _newestFeedbackTime() {
+    final all = [..._rideFeedbackTimes, ..._appFeedbackTimes];
+    if (all.isEmpty) return null;
+    all.sort();
+    return all.last;
+  }
+
+  List<DateTime> _timesFrom(QuerySnapshot snap) {
+    final times = <DateTime>[];
+    for (final d in snap.docs) {
+      final created = (d.data() as Map<String, dynamic>)['createdAt'];
+      if (created is Timestamp) times.add(created.toDate());
+    }
+    return times;
+  }
+
+  Future<void> _setFeedbackSeen(int ms) async {
+    _feedbackSeenMs = ms;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('adminFeedbackSeenMs', ms);
+    } catch (_) {}
+  }
+
+  // Called when the admin opens the Feedback page (or while it is open).
+  void _markFeedbackSeen() {
+    final newest = _newestFeedbackTime();
+    final ms = newest?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch;
+    if (_feedbackSeenMs == null || ms > _feedbackSeenMs!) {
+      _setFeedbackSeen(ms);
+    }
+  }
+
+  // The first time this browser opens the dashboard, existing feedback counts
+  // as already seen so the badge only shows feedback that arrives afterwards.
+  void _afterFeedbackUpdate() {
+    if (!_rideFeedbackLoaded || !_appFeedbackLoaded) return;
+    if (_feedbackSeenMs == null) {
+      final newest = _newestFeedbackTime();
+      _setFeedbackSeen(newest?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch);
+    } else if (_selectedIndex == 4) {
+      _markFeedbackSeen();
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _startBadgeListeners() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _feedbackSeenMs = prefs.getInt('adminFeedbackSeenMs');
+    } catch (_) {}
+
+    final db = FirebaseFirestore.instance;
+
+    _badgeSubs.add(db
+        .collection('drivers')
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      setState(() => _pendingDriverCount = snap.docs.length);
+    }, onError: (_) {}));
+
+    _badgeSubs.add(db
+        .collection('drivers')
+        .where('commissionPaymentPending', isEqualTo: true)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      setState(() => _pendingPaymentCount = snap.docs.length);
+    }, onError: (_) {}));
+
+    _badgeSubs.add(db
+        .collection('rides')
+        .where('status', whereIn: ['pending', 'negotiating', 'accepted'])
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      setState(() {
+        _activeRides = snap.docs.map((d) => d.data()).toList();
+      });
+    }, onError: (_) {}));
+
+    _badgeSubs.add(db.collection('ride_feedback').snapshots().listen((snap) {
+      _rideFeedbackTimes = _timesFrom(snap);
+      _rideFeedbackLoaded = true;
+      _afterFeedbackUpdate();
+    }, onError: (_) {}));
+
+    _badgeSubs.add(db.collection('app_feedback').snapshots().listen((snap) {
+      _appFeedbackTimes = _timesFrom(snap);
+      _appFeedbackLoaded = true;
+      _afterFeedbackUpdate();
+    }, onError: (_) {}));
+  }
+
+  // Small red number used on buttons and the sidebar. Shows nothing for 0.
+  Widget _redBadge(int count) {
+    if (count <= 0) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(left: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+      decoration: BoxDecoration(
+        color: Colors.red,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        count > 99 ? '99+' : '$count',
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Widget _labelWithBadge(String text, int count) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [Text(text), _redBadge(count)],
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     ServerClock.sync();
-    _loadFeedbackLastSeen();
+    _startBadgeListeners();
     // Re-sync the clock every 5 minutes and refresh the page every 30 seconds
     // so online/offline status stays current without pressing refresh.
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (t) {
@@ -106,107 +246,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    for (final s in _badgeSubs) {
+      s.cancel();
+    }
     _driverSearchController.dispose();
     _rideHistorySearchController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadFeedbackLastSeen() async {
-    final prefs = await SharedPreferences.getInstance();
-    final ms = prefs.getInt('adminFeedbackLastSeen');
-    if (!mounted) return;
-    if (ms == null) {
-      // First time on this device: start from zero instead of flagging old feedback.
-      setState(_markFeedbackSeen);
-    } else {
-      setState(() => _feedbackLastSeen = DateTime.fromMillisecondsSinceEpoch(ms));
-    }
-  }
-
-  void _markFeedbackSeen() {
-    final now = ServerClock.now();
-    _feedbackLastSeen = now;
-    SharedPreferences.getInstance()
-        .then((p) => p.setInt('adminFeedbackLastSeen', now.millisecondsSinceEpoch));
-  }
-
-  // Call inside setState. Feedback counts as seen when you open or leave that page.
-  void _selectPage(int index) {
-    if (_selectedIndex == 4 || index == 4) _markFeedbackSeen();
-    _selectedIndex = index;
-  }
-
-  // Wraps the screen with the live counts used by all the red badges.
-  Widget _withCounts(Widget Function(_Counts counts) builder) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _pendingDriversStream,
-      builder: (context, pendingSnap) => StreamBuilder<QuerySnapshot>(
-        stream: _pendingPaymentsStream,
-        builder: (context, paySnap) => StreamBuilder<QuerySnapshot>(
-          stream: _ongoingRidesStream,
-          builder: (context, ongoingSnap) => StreamBuilder<QuerySnapshot>(
-            stream: _rideFeedbackStream,
-            builder: (context, rideFbSnap) => StreamBuilder<QuerySnapshot>(
-              stream: _appFeedbackStream,
-              builder: (context, appFbSnap) {
-                int ongoing = 0;
-                for (final d in ongoingSnap.data?.docs ?? <QueryDocumentSnapshot>[]) {
-                  final m = d.data() as Map<String, dynamic>;
-                  final created = m['createdAt'];
-                  // Same rule as the Ongoing list: hide requests nobody accepted in 15 minutes.
-                  if (m['status'] == 'pending' &&
-                      created is Timestamp &&
-                      DateTime.now().difference(created.toDate()).inMinutes >= 15) {
-                    continue;
-                  }
-                  ongoing++;
-                }
-
-                int newFeedback = 0;
-                final seen = _feedbackLastSeen;
-                if (seen != null && _selectedIndex != 4) {
-                  for (final snap in [rideFbSnap, appFbSnap]) {
-                    for (final d in snap.data?.docs ?? <QueryDocumentSnapshot>[]) {
-                      final t = (d.data() as Map<String, dynamic>)['createdAt'];
-                      if (t is Timestamp && t.toDate().isAfter(seen)) newFeedback++;
-                    }
-                  }
-                }
-
-                return builder(_Counts(
-                  pendingDrivers: pendingSnap.data?.docs.length ?? 0,
-                  pendingPayments: paySnap.data?.docs.length ?? 0,
-                  ongoingRides: ongoing,
-                  newFeedback: newFeedback,
-                ));
-              },
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // A tab label with a red number next to it when count > 0.
-  Widget _tabLabel(String text, int count) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(text),
-        if (count > 0) ...[
-          const SizedBox(width: 6),
-          _CountBadge(count: count),
-        ],
-      ],
-    );
-  }
-
   void _navigateTo(int pageIndex, {int? driversSubTab, int? ridesSubTab}) {
     setState(() {
-      _selectPage(pageIndex);
+      _selectedIndex = pageIndex;
       if (driversSubTab != null) _driversSubTab = driversSubTab;
       if (ridesSubTab != null) _ridesSubTab = ridesSubTab;
     });
+    if (pageIndex == 4) _markFeedbackSeen();
   }
 
   Widget _buildEmptyState(String message) {
@@ -600,7 +654,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 final completedAt = r['completedAt'];
                 if (driverId is! String || completedAt is! Timestamp) continue;
                 final d = completedAt.toDate();
-                final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
+                final key = CommissionPeriod.keyFor(d);
                 final months = rideSums.putIfAbsent(driverId, () => {});
                 months[key] = (months[key] ?? 0) + ((r['commissionAmount'] ?? 0) as num);
               }
@@ -648,6 +702,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     DataColumn(label: Text('Last Active')),
                     DataColumn(label: Text('No-Shows')),
                     DataColumn(label: Text('Cancellations')),
+                    DataColumn(label: Text('Ride Ban')),
                     DataColumn(label: Text('Commission Owed')),
                   ],
                   rows: drivers.asMap().entries.map((entry) {
@@ -678,6 +733,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           color: cancels >= 3 ? Colors.red : null,
                         ),
                       )),
+                      DataCell(_DriverBanCell(driverId: doc.id, data: data)),
                       DataCell(_CommissionOwedCell(driverId: doc.id, rideMonths: rideSums[doc.id] ?? const {})),
                     ]);
                   }).toList(),
@@ -718,7 +774,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildDriversTab(_Counts counts) {
+  Widget _buildDriversTab() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -726,9 +782,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: SegmentedButton<int>(
             segments: [
-              ButtonSegment(value: 0, label: _tabLabel('Pending', counts.pendingDrivers)),
+              ButtonSegment(value: 0, label: _labelWithBadge('Pending', _pendingDriverCount)),
               const ButtonSegment(value: 1, label: Text('All Drivers')),
-              ButtonSegment(value: 2, label: _tabLabel('Commission', counts.pendingPayments)),
+              ButtonSegment(value: 2, label: _labelWithBadge('Commission', _pendingPaymentCount)),
             ],
             selected: {_driversSubTab},
             onSelectionChanged: (newSelection) {
@@ -814,8 +870,35 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text('Passenger: ${data['passengerName'] ?? '-'} (${data['passengerPhone'] ?? '-'})'),
-                    Text('Type: ${data['passengerType'] ?? 'Regular'}'),
+                    Text(
+                      'Ride: ${(data['rideType'] == 'Arkila' || data['offeredFare'] != null) ? 'Arkila' : 'Regular Ride'}',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    Text(
+                      (data['typesConfirmed'] == true || data['agreedFare'] != null)
+                          ? 'Type: ${data['passengerType'] ?? 'Regular'}'
+                          : 'Type: waiting for the driver to confirm',
+                    ),
                     Text('Passengers: ${data['passengerCount'] ?? 1}'),
+                    if (data['hasBulkyItem'] == true) ...[
+                      const Text(
+                        'Carrying something big',
+                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepOrange),
+                      ),
+                      if ((data['bulkyItemPhotoUrl'] ?? '').toString().isNotEmpty)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 32)),
+                            onPressed: () => launchUrl(
+                              Uri.parse(data['bulkyItemPhotoUrl'].toString()),
+                              mode: LaunchMode.externalApplication,
+                            ),
+                            icon: const Icon(Icons.photo_outlined, size: 18),
+                            label: const Text('View bag / item photo'),
+                          ),
+                        ),
+                    ],
                     Text('Pickup: ${data['pickupLocation'] ?? '-'}'),
                     Text('Drop-off: ${data['dropoffLocation'] ?? '-'}'),
                     if (data['offeredFare'] != null)
@@ -831,7 +914,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       if (data['agreedFare'] != null)
-                        Text('Agreed fare: ₱${data['agreedFare']}'),
+                        Text('Agreed fare: ₱${data['agreedFare']}')
+                      else if (data['typesConfirmed'] == true)
+                        Text(
+                          'Fare: ₱${(((data['passengerTypes'] as List?) ?? const []).fold<num>(0, (total, t) => total + (t == 'Regular' ? 17 : 14))).toStringAsFixed(2)}',
+                        ),
                     ],
                   ],
                 ),
@@ -870,6 +957,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return list;
   }
 
+  DateTime _rideEndTime(Map<String, dynamic> data) {
+    for (final key in ['completedAt', 'cancelledAt', 'noShowAt', 'createdAt']) {
+      final v = data[key];
+      if (v is Timestamp) return v.toDate();
+    }
+    return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  String _historyStatusLabel(Map<String, dynamic> data) {
+    switch (data['status']) {
+      case 'cancelled':
+        return data['driverId'] != null ? 'Cancelled after accepted' : 'Cancelled before accepted';
+      case 'no_show':
+        return data['noShowBy'] == 'driver' ? 'Driver no-show' : 'Passenger no-show';
+      default:
+        return 'Completed';
+    }
+  }
+
   Widget _buildRideHistory() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -879,10 +985,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           'Search by passenger or driver name',
           (value) => setState(() => _rideHistorySearch = value),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final f in const [
+                ['all', 'All'],
+                ['completed', 'Completed'],
+                ['cancelled', 'Cancelled'],
+                ['no_show', 'No-show'],
+              ])
+                ChoiceChip(
+                  label: Text(f[1]),
+                  selected: _historyFilter == f[0],
+                  selectedColor: const Color(0xFFC8E6C9),
+                  onSelected: (_) => setState(() => _historyFilter = f[0]),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
-            stream: _completedRidesStream,
+            stream: _historyRidesStream,
             builder: (context, snapshot) {
               if (snapshot.hasError) {
                 return Center(child: Text('Could not load rides: ${snapshot.error}'));
@@ -891,25 +1019,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 return const Center(child: CircularProgressIndicator());
               }
               if (snapshot.data!.docs.isEmpty) {
-                return _buildEmptyState('No completed rides yet');
+                return _buildEmptyState('No finished rides yet');
               }
 
               final query = _rideHistorySearch.trim().toLowerCase();
-              final rides = _sortNewestFirst(snapshot.data!.docs, 'completedAt').where((doc) {
+              final rides = snapshot.data!.docs.where((doc) {
                 final data = doc.data() as Map<String, dynamic>;
+                if (_historyFilter != 'all' && data['status'] != _historyFilter) return false;
                 final passenger = (data['passengerName'] ?? '').toString().toLowerCase();
                 final driver = (data['driverName'] ?? '').toString().toLowerCase();
                 return passenger.contains(query) || driver.contains(query);
-              }).toList();
+              }).toList()
+                ..sort((a, b) => _rideEndTime(b.data() as Map<String, dynamic>)
+                    .compareTo(_rideEndTime(a.data() as Map<String, dynamic>)));
 
               if (rides.isEmpty) return _buildEmptyState('No matching rides');
 
-              // Group the rides by the day they were completed.
+              final completedCount =
+                  rides.where((d) => (d.data() as Map<String, dynamic>)['status'] == 'completed').length;
+
+              // Group the rides by the day they ended.
               final groups = <String, List<QueryDocumentSnapshot>>{};
               for (final doc in rides) {
                 final data = doc.data() as Map<String, dynamic>;
-                final ts = data['completedAt'];
-                final key = ts is Timestamp ? _dateLabel(ts.toDate()) : 'Unknown date';
+                final t = _rideEndTime(data);
+                final key = t.millisecondsSinceEpoch == 0 ? 'Unknown date' : _dateLabel(t);
                 groups.putIfAbsent(key, () => []).add(doc);
               }
 
@@ -920,8 +1054,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Text(
-                        query.isEmpty
-                            ? 'Total completed rides: ${rides.length}'
+                        (query.isEmpty && _historyFilter == 'all')
+                            ? 'Total rides: ${rides.length}  ·  Completed: $completedCount'
                             : 'Showing ${rides.length} of ${snapshot.data!.docs.length} rides',
                         style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
                       ),
@@ -947,6 +1081,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           columns: const [
                             DataColumn(label: Text('#')),
                             DataColumn(label: Text('Time')),
+                            DataColumn(label: Text('Result')),
+                            DataColumn(label: Text('Ride')),
                             DataColumn(label: Text('Passenger')),
                             DataColumn(label: Text('Type')),
                             DataColumn(label: Text('Driver')),
@@ -959,19 +1095,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           rows: entry.value.asMap().entries.map((e) {
                             final doc = e.value;
                             final data = doc.data() as Map<String, dynamic>;
-                            final ts = data['completedAt'];
-                            return DataRow(key: ValueKey(doc.id), cells: [
-                              DataCell(Text('${e.key + 1}')),
-                              DataCell(Text(ts is Timestamp ? _timeLabel(ts.toDate()) : '-')),
-                              DataCell(Text('${data['passengerName'] ?? '-'}')),
-                              DataCell(Text('${data['passengerType'] ?? 'Regular'}')),
-                              DataCell(Text('${data['driverName'] ?? '-'}')),
-                              DataCell(Text('${data['pickupLocation'] ?? '-'}')),
-                              DataCell(Text('${data['dropoffLocation'] ?? '-'}')),
-                              DataCell(Text(data['fare'] != null ? '₱${data['fare']}' : '-')),
-                              DataCell(Text(data['isNegotiated'] == true ? 'Yes' : 'No')),
-                              DataCell(Text('₱${data['commissionAmount'] ?? 0}')),
-                            ]);
+                            final done = data['status'] == 'completed';
+                            final t = _rideEndTime(data);
+                            return DataRow(
+                              key: ValueKey(doc.id),
+                              color: done ? null : WidgetStatePropertyAll(Colors.red.shade50),
+                              cells: [
+                                DataCell(Text('${e.key + 1}')),
+                                DataCell(Text(t.millisecondsSinceEpoch == 0 ? '-' : _timeLabel(t))),
+                                DataCell(Text(
+                                  _historyStatusLabel(data),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: done ? Colors.green.shade800 : Colors.red.shade800,
+                                  ),
+                                )),
+                                DataCell(Text((data['rideType'] == 'Arkila' || data['offeredFare'] != null) ? 'Arkila' : 'Regular')),
+                                DataCell(Text('${data['passengerName'] ?? '-'}')),
+                                DataCell(Text(done ? '${data['passengerType'] ?? 'Regular'}' : '-')),
+                                DataCell(Text('${data['driverName'] ?? '-'}')),
+                                DataCell(Text('${data['pickupLocation'] ?? '-'}')),
+                                DataCell(Text('${data['dropoffLocation'] ?? '-'}')),
+                                DataCell(Text(done && data['fare'] != null ? '₱${data['fare']}' : '-')),
+                                DataCell(Text(done ? (data['isNegotiated'] == true ? 'Yes' : 'No') : '-')),
+                                DataCell(Text(done ? '₱${data['commissionAmount'] ?? 0}' : '-')),
+                              ],
+                            );
                           }).toList(),
                         ),
                       ),
@@ -987,7 +1136,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildRidesTab(_Counts counts) {
+  Widget _buildRidesTab() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -995,7 +1144,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: SegmentedButton<int>(
             segments: [
-              ButtonSegment(value: 0, label: _tabLabel('Ongoing', counts.ongoingRides)),
+              ButtonSegment(value: 0, label: _labelWithBadge('Ongoing', _ongoingRideCount)),
               const ButtonSegment(value: 1, label: Text('History')),
             ],
             selected: {_ridesSubTab},
@@ -1012,16 +1161,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _getSelectedPage(_Counts counts) {
+  Widget _getSelectedPage() {
     switch (_selectedIndex) {
       case 0:
         return AdminAnalyticsScreen(onNavigate: _navigateTo);
       case 1:
-        return _buildDriversTab(counts);
+        return _buildDriversTab();
       case 2:
         return const AdminPassengersScreen();
       case 3:
-        return _buildRidesTab(counts);
+        return _buildRidesTab();
       case 4:
         return const AdminFeedbackScreen();
       default:
@@ -1039,7 +1188,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return months[month - 1];
   }
 
-  Widget _buildTopHeader(_Counts counts, {bool compact = false}) {
+  Widget _buildTopHeader({bool compact = false}) {
     return SizedBox(
       height: compact ? 64 : 76,
       width: double.infinity,
@@ -1067,20 +1216,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               children: [
                 if (compact)
                   Builder(
-                    builder: (ctx) => Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.menu, color: Colors.white),
-                          tooltip: 'Menu',
-                          onPressed: () => Scaffold.of(ctx).openDrawer(),
-                        ),
-                        Positioned(
-                          right: 2,
-                          top: 2,
-                          child: IgnorePointer(child: _CountBadge(count: counts.total)),
-                        ),
-                      ],
+                    builder: (ctx) => IconButton(
+                      icon: const Icon(Icons.menu, color: Colors.white),
+                      tooltip: 'Menu',
+                      onPressed: () => Scaffold.of(ctx).openDrawer(),
                     ),
                   ),
                 Container(
@@ -1132,21 +1271,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     margin: const EdgeInsets.symmetric(horizontal: 12),
                   ),
                 ],
-                StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('drivers')
-                      .where('status', isEqualTo: 'pending')
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    final pendingDrivers = snapshot.data?.docs.length ?? 0;
-                    return StreamBuilder<QuerySnapshot>(
-                      stream: FirebaseFirestore.instance
-                          .collection('drivers')
-                          .where('commissionPaymentPending', isEqualTo: true)
-                          .snapshots(),
-                      builder: (context, paySnapshot) {
-                        final pendingPayments = paySnapshot.data?.docs.length ?? 0;
-                        final count = pendingDrivers + pendingPayments;
+                Builder(
+                  builder: (context) {
+                    final pendingDrivers = _pendingDriverCount;
+                    final pendingPayments = _pendingPaymentCount;
+                    final count = pendingDrivers + pendingPayments;
                         return Padding(
                           padding: EdgeInsets.zero,
                           child: Stack(
@@ -1197,8 +1326,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             ],
                           ),
                         );
-                      },
-                    );
                   },
                 ),
                 IconButton(
@@ -1225,7 +1352,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildSidebar(_Counts counts, {bool inDrawer = false}) {
+  int _sidebarBadgeFor(int index) {
+    switch (index) {
+      case 1:
+        return _driversBadgeCount;
+      case 3:
+        return _ongoingRideCount;
+      case 4:
+        return _unseenFeedbackCount;
+      default:
+        return 0;
+    }
+  }
+
+  Widget _buildSidebar({bool inDrawer = false}) {
     return Container(
       width: inDrawer ? double.infinity : 220,
       color: const Color(0xFFEAF5EC),
@@ -1246,7 +1386,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               child: InkWell(
                 borderRadius: BorderRadius.circular(10),
                 onTap: () {
-                  setState(() => _selectPage(index));
+                  setState(() => _selectedIndex = index);
+                  if (index == 4) _markFeedbackSeen();
                   if (inDrawer) Navigator.pop(context);
                 },
                 child: Padding(
@@ -1269,7 +1410,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           ),
                         ),
                       ),
-                      _CountBadge(count: counts.forPage(index)),
+                      _redBadge(_sidebarBadgeFor(index)),
                     ],
                   ),
                 ),
@@ -1288,10 +1429,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return _withCounts(_buildLayout);
-  }
-
-  Widget _buildLayout(_Counts counts) {
     return LayoutBuilder(
       builder: (context, constraints) {
         // On a phone-sized screen the side menu becomes a slide-out drawer.
@@ -1300,17 +1437,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           drawer: narrow
               ? Drawer(
                   backgroundColor: const Color(0xFFEAF5EC),
-                  child: SafeArea(child: _buildSidebar(counts, inDrawer: true)),
+                  child: SafeArea(child: _buildSidebar(inDrawer: true)),
                 )
               : null,
           body: Column(
             children: [
-              _buildTopHeader(counts, compact: narrow),
+              _buildTopHeader(compact: narrow),
               Expanded(
                 child: Row(
                   children: [
                     if (!narrow) ...[
-                      _buildSidebar(counts),
+                      _buildSidebar(),
                       const VerticalDivider(width: 1),
                     ],
                     Expanded(
@@ -1328,7 +1465,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               ),
                             ),
                           ),
-                          Expanded(child: _getSelectedPage(counts)),
+                          Expanded(child: _getSelectedPage()),
                         ],
                       ),
                     ),
@@ -1344,58 +1481,62 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 }
 
 
-/// The numbers shown in the red badges.
-class _Counts {
-  final int pendingDrivers;
-  final int pendingPayments;
-  final int ongoingRides;
-  final int newFeedback;
+/// Ride Ban column for a driver: a short cancellation ban, and/or "blocked"
+/// when a past week's commission is still unpaid (cleared by Mark Paid).
+class _DriverBanCell extends StatefulWidget {
+  final String driverId;
+  final Map<String, dynamic> data;
+  const _DriverBanCell({required this.driverId, required this.data});
 
-  const _Counts({
-    required this.pendingDrivers,
-    required this.pendingPayments,
-    required this.ongoingRides,
-    required this.newFeedback,
-  });
-
-  int get drivers => pendingDrivers + pendingPayments;
-  int get total => drivers + ongoingRides + newFeedback;
-
-  // Badge for each side-menu page (0 Overview, 1 Drivers, 2 Passengers, 3 Rides, 4 Feedback).
-  int forPage(int index) {
-    switch (index) {
-      case 1:
-        return drivers;
-      case 3:
-        return ongoingRides;
-      case 4:
-        return newFeedback;
-      default:
-        return 0;
-    }
-  }
+  @override
+  State<_DriverBanCell> createState() => _DriverBanCellState();
 }
 
-/// Small red number. Shows nothing when the count is 0.
-class _CountBadge extends StatelessWidget {
-  final int count;
-  const _CountBadge({required this.count});
+class _DriverBanCellState extends State<_DriverBanCell> {
+  late final Stream<QuerySnapshot> _stream = FirebaseFirestore.instance
+      .collection('drivers')
+      .doc(widget.driverId)
+      .collection('commission_records')
+      .snapshots();
 
   @override
   Widget build(BuildContext context) {
-    if (count <= 0) return const SizedBox.shrink();
-    return Container(
-      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-      padding: const EdgeInsets.symmetric(horizontal: 5),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: Colors.red,
-        borderRadius: BorderRadius.circular(9),
-      ),
-      child: Text(
-        count > 99 ? '99+' : '$count',
-        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-      ),
+    return StreamBuilder<QuerySnapshot>(
+      stream: _stream,
+      builder: (context, snapshot) {
+        num overdue = 0;
+        for (final record in snapshot.data?.docs ?? <QueryDocumentSnapshot>[]) {
+          if (!CommissionPeriod.isOverdueKey(record.id)) continue;
+          final r = record.data() as Map<String, dynamic>;
+          final b = ((r['totalEarned'] ?? 0) as num) - ((r['amountPaid'] ?? 0) as num);
+          if (b > 0) overdue += b;
+        }
+        final hasBan = AdminBanCell.banUntil(widget.data) != null;
+        if (overdue <= 0) {
+          return AdminBanCell(collection: 'drivers', id: widget.driverId, data: widget.data);
+        }
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: Colors.red.shade300),
+              ),
+              child: Text(
+                'Blocked: ₱$overdue unpaid',
+                style: TextStyle(color: Colors.red.shade800, fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+            ),
+            if (hasBan) ...[
+              const SizedBox(width: 6),
+              AdminBanCell(collection: 'drivers', id: widget.driverId, data: widget.data),
+            ],
+          ],
+        );
+      },
     );
   }
 }

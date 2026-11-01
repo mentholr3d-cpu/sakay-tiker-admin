@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../widgets/animated_press.dart';
+import 'admin_ban_cell.dart';
 
 class AdminPassengersScreen extends StatefulWidget {
   const AdminPassengersScreen({super.key});
@@ -155,6 +156,7 @@ class _AdminPassengersScreenState extends State<AdminPassengersScreen> {
                           DataColumn(label: Text('Email')),
                           DataColumn(label: Text('Address')),
                           DataColumn(label: Text('Cancel / No-Show')),
+                          DataColumn(label: Text('Ride Ban')),
                           DataColumn(label: Text('Account')),
                           DataColumn(label: Text('Action')),
                         ],
@@ -177,6 +179,7 @@ class _AdminPassengersScreenState extends State<AdminPassengersScreen> {
                                 color: cancels >= 3 ? Colors.red : null,
                               ),
                             )),
+                            DataCell(AdminBanCell(collection: 'passengers', id: doc.id, data: data)),
                             DataCell(Text(isSuspended ? 'Suspended' : 'Active')),
                             DataCell(
                               AnimatedPress(

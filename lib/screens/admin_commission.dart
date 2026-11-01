@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'commission_period.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cloudinary_public/cloudinary_public.dart';
@@ -22,10 +23,7 @@ class _AdminCommissionScreenState extends State<AdminCommissionScreen> {
       .where('status', isEqualTo: 'completed')
       .snapshots();
 
-  String _currentMonthKey() {
-    final now = DateTime.now();
-    return '${now.year}-${now.month.toString().padLeft(2, '0')}';
-  }
+  String _currentMonthKey() => CommissionPeriod.currentKey();
 
   Widget _buildEmptyState(String message) {
     return Center(
@@ -194,34 +192,12 @@ class _AdminCommissionScreenState extends State<AdminCommissionScreen> {
     });
   }
 
-  /// After the admin reviews a payment: clear the driver's "payment to verify" flag
-  /// when nothing else is waiting, and tell the driver the result.
-  Future<void> _afterReview(String driverId, String title, String message) async {
-    final driverRef = FirebaseFirestore.instance.collection('drivers').doc(driverId);
-    final waiting = await driverRef
-        .collection('commission_records')
-        .where('paymentSubmitted', isEqualTo: true)
-        .limit(1)
-        .get();
-    if (waiting.docs.isEmpty) {
-      await driverRef.update({'commissionPaymentPending': false});
-    }
-    await FirebaseFirestore.instance.collection('notifications').add({
-      'recipientId': driverId,
-      'recipientRole': 'driver',
-      'title': title,
-      'message': message,
-      'read': false,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-  }
-
   Future<void> _rejectPayment(BuildContext context, String driverId, String monthKey) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Reject Payment'),
-        content: Text('Reject the submitted payment for $monthKey? The driver will see that it was not confirmed and can pay again.'),
+        content: Text('Reject the submitted payment for ${CommissionPeriod.label(monthKey)}? The driver will see that it was not confirmed and can pay again.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           ElevatedButton(
@@ -240,12 +216,6 @@ class _AdminCommissionScreenState extends State<AdminCommissionScreen> {
         .collection('commission_records')
         .doc(monthKey)
         .update({'paymentSubmitted': false, 'paymentRejected': true});
-
-    await _afterReview(
-      driverId,
-      'Payment Not Confirmed',
-      'The admin could not confirm your commission payment for $monthKey. Please check the amount and receipt, then pay again.',
-    );
   }
 
   /// Record a payment (reduce the balance) or correct one (add it back).
@@ -277,7 +247,7 @@ class _AdminCommissionScreenState extends State<AdminCommissionScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setLocal) => AlertDialog(
-          title: Text('Adjust balance - $monthKey'),
+          title: Text('Adjust balance - ${CommissionPeriod.label(monthKey)}'),
           content: SizedBox(
             width: 340,
             child: Column(
@@ -362,15 +332,6 @@ class _AdminCommissionScreenState extends State<AdminCommissionScreen> {
         'accountStatus': 'active',
       });
     }
-
-    await _afterReview(
-      driverId,
-      isReduce ? 'Payment Confirmed' : 'Balance Adjusted',
-      isReduce
-          ? 'Your commission payment of ₱$amount for $monthKey was confirmed. '
-              '${newBalance <= 0 ? 'This month is fully paid.' : 'Remaining balance: ₱$newBalance.'}'
-          : 'The admin adjusted your commission for $monthKey. Balance: ₱$newBalance.',
-    );
   }
 
   Future<void> _toggleSuspend(BuildContext context, String driverId, bool suspend) async {
@@ -440,7 +401,7 @@ class _AdminCommissionScreenState extends State<AdminCommissionScreen> {
                 final completedAt = r['completedAt'];
                 if (driverId is! String || completedAt is! Timestamp) continue;
                 final d = completedAt.toDate();
-                final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
+                final key = CommissionPeriod.keyFor(d);
                 final months = rideSums.putIfAbsent(driverId, () => {});
                 months[key] = (months[key] ?? 0) + ((r['commissionAmount'] ?? 0) as num);
               }
@@ -652,9 +613,10 @@ class _DriverCommissionCardState extends State<_DriverCommissionCard> {
                           final isCurrent = month == widget.currentMonth;
                           final rec = records[month];
                           final submitted = rec?['paymentSubmitted'] == true && rec?['status'] != 'paid';
+                          final pretty = CommissionPeriod.label(month);
                           final label = isCurrent
-                              ? '$month (this month)'
-                              : (balance > 0 ? '$month (OVERDUE)' : month);
+                              ? '$pretty (this ${CommissionPeriod.name(month)})'
+                              : (balance > 0 ? '$pretty (OVERDUE)' : pretty);
 
                           return Padding(
                             padding: const EdgeInsets.symmetric(vertical: 2),
