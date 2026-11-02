@@ -451,6 +451,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
+  // Date and time the driver sent the registration request.
+  String _registeredText(Map<String, dynamic> data) {
+    final created = data['createdAt'];
+    if (created is! Timestamp) return '-';
+    final d = created.toDate();
+    return '${_month(d.month)} ${d.day}, ${d.year} at ${_timeLabel(d)}';
+  }
+
   Widget _buildPendingDrivers() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -499,6 +507,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           Text('Email: ${(data['email'] ?? '').toString().isEmpty ? '-' : data['email']}'),
                           Text('MTOP Number: ${data['mtopNumber'] ?? '-'}'),
                           Text('Plate Number: ${data['plateNumber'] ?? '-'}'),
+                          Text('Registered: ${_registeredText(data)}'),
                           const SizedBox(height: 8),
                           Wrap(
                             children: [
