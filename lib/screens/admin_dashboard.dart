@@ -1257,7 +1257,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     if (!compact) ...[
                       const SizedBox(height: 1),
                       Text(
-                        'Central Bontoc, Mountain Province',
+                        'Bontoc, Mountain Province',
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.85),
