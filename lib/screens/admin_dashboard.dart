@@ -866,7 +866,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       children: [
                         Text(
                           status == 'accepted'
-                              ? 'ONGOING'
+                              ? ((data['startedAt'] != null || data['typesConfirmed'] == true)
+                                  ? 'ONGOING'
+                                  : (data['arrivedAt'] != null ? 'DRIVER AT PICKUP' : 'DRIVER ON THE WAY'))
                               : (status == 'negotiating' ? 'NEGOTIATING FARE' : 'WAITING FOR DRIVER'),
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
