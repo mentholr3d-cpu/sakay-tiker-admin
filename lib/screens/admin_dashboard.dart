@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'admin_commission.dart';
 import 'admin_feedback.dart';
+import 'admin_reports.dart';
 import 'admin_analytics.dart';
 import 'admin_passengers.dart';
 import 'admin_login.dart';
@@ -57,6 +58,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     'Passengers',
     'Rides',
     'Feedback',
+    'Reports',
   ];
 
   static const List<Map<String, dynamic>> _navItems = [
@@ -65,6 +67,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     {'icon': Icons.person_pin, 'label': 'Passengers'},
     {'icon': Icons.directions_car, 'label': 'Rides'},
     {'icon': Icons.feedback, 'label': 'Feedback'},
+    {'icon': Icons.assessment, 'label': 'Reports'},
   ];
 
   static const List<String> _rejectionReasons = [
@@ -1184,6 +1187,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         return _buildRidesTab();
       case 4:
         return const AdminFeedbackScreen();
+      case 5:
+        return const AdminReportsScreen();
       default:
         return const SizedBox.shrink();
     }
