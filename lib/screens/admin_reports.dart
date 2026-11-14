@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -497,7 +498,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
         l.isEmpty ? [['No data', '-']] : [for (final e in l) [e.key, '${e.value}']];
 
     final d = r.driver;
-    final name = _preparedBy.text.trim();
+    final name = _preparedBy.text.trim().toUpperCase();
 
     final commissionRows = <List<String>>[
       ['Commission earned from completed rides', pm(r.commissionEarned)],
@@ -509,10 +510,9 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
 
     pw.Widget signature() => pw.Row(
           crossAxisAlignment: pw.CrossAxisAlignment.end,
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
             pw.SizedBox(
-              width: 230,
+              width: 250,
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
@@ -528,18 +528,6 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                       color: name.isEmpty ? grey : PdfColors.black,
                     ),
                   ),
-                ],
-              ),
-            ),
-            pw.SizedBox(
-              width: 150,
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.SizedBox(height: 44),
-                  pw.Container(height: 0.8, color: PdfColors.black),
-                  pw.SizedBox(height: 3),
-                  pw.Text('Date', style: pw.TextStyle(fontSize: 10, color: grey)),
                 ],
               ),
             ),
@@ -909,6 +897,14 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
               width: 200,
               child: TextField(
                 controller: _preparedBy,
+                textCapitalization: TextCapitalization.characters,
+                inputFormatters: [
+                  // Letters, spaces, periods and dashes only (no numbers), always shown in capitals.
+                  FilteringTextInputFormatter.allow(RegExp(r'[A-Za-zÑñ .\-]')),
+                  TextInputFormatter.withFunction(
+                    (oldValue, newValue) => newValue.copyWith(text: newValue.text.toUpperCase()),
+                  ),
+                ],
                 decoration: const InputDecoration(
                   labelText: 'Prepared by (name)',
                   isDense: true,
