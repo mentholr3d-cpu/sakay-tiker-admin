@@ -1,11 +1,14 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'commission_period.dart';
+import 'admin_logo_data.dart';
 
-/// Admin > Reports: day / week / month / year summaries with a PDF download.
+/// Admin > Reports: day / week / month / year summaries for all drivers or one driver.
+/// On screen it is detailed; the printed page is a short one-page version with a signature line.
 class AdminReportsScreen extends StatefulWidget {
   const AdminReportsScreen({super.key});
 
@@ -13,18 +16,37 @@ class AdminReportsScreen extends StatefulWidget {
   State<AdminReportsScreen> createState() => _AdminReportsScreenState();
 }
 
+class _DriverOption {
+  final String id;
+  final String name;
+  final String plate;
+  final String mtop;
+  const _DriverOption(this.id, this.name, this.plate, this.mtop);
+}
+
+class _RideRow {
+  final DateTime? when; // Manila time
+  final String pickup;
+  final String dropoff;
+  final String passenger;
+  final String driver;
+  final String status;
+  final double? fare;
+  const _RideRow(this.when, this.pickup, this.dropoff, this.passenger, this.driver, this.status, this.fare);
+}
+
 class _ReportData {
   final String title;
   final String rangeLabel;
   final DateTime generatedAt; // Manila time
+  final _DriverOption? driver; // null = all drivers
   // Rides
   int total = 0, completed = 0, cancelled = 0, expired = 0, noShow = 0, active = 0;
-  int regular = 0, arkila = 0, negotiated = 0;
+  int regular = 0, arkila = 0, negotiated = 0, declined = 0;
   double fareTotal = 0, commissionEarned = 0;
   // Rankings
   List<MapEntry<String, int>> topPickups = [];
   List<MapEntry<String, int>> topDropoffs = [];
-  List<MapEntry<String, int>> topDrivers = [];
   List<int> hours = List.filled(24, 0);
   // Safety
   int cancelledByPassenger = 0, cancelledByDriver = 0, farFromDropoff = 0;
@@ -36,8 +58,10 @@ class _ReportData {
   // Previous period
   int prevTotal = 0, prevCompleted = 0;
   double prevFare = 0;
+  // Ride list (newest first)
+  List<_RideRow> rows = [];
 
-  _ReportData(this.title, this.rangeLabel, this.generatedAt);
+  _ReportData(this.title, this.rangeLabel, this.generatedAt, this.driver);
 
   double get avgFare => completed == 0 ? 0 : fareTotal / completed;
   double get completionRate => total == 0 ? 0 : completed * 100 / total;
@@ -52,20 +76,27 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   static const _shortMonths = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
   ];
+  static const int _pageSize = 10;
 
   String _period = 'day'; // day | week | month | year
+  String _scope = 'all'; // all | driver
   late DateTime _anchor; // Manila calendar date (y/m/d only)
-  final _preparedBy = TextEditingController(text: 'Administrator');
+  final _preparedBy = TextEditingController();
+
+  List<_DriverOption> _drivers = [];
+  String? _driverId;
 
   bool _loading = false;
   String? _error;
   _ReportData? _report;
+  int _visibleRides = _pageSize;
 
   @override
   void initState() {
     super.initState();
     final m = _manilaNow();
     _anchor = DateTime(m.year, m.month, m.day);
+    _loadDrivers();
     _generate();
   }
 
@@ -75,10 +106,32 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     super.dispose();
   }
 
+  Future<void> _loadDrivers() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('drivers').get();
+      final list = <_DriverOption>[];
+      for (final d in snap.docs) {
+        final x = d.data();
+        final status = (x['status'] ?? '').toString();
+        if (status == 'pending' || status == 'rejected') continue;
+        list.add(_DriverOption(
+          d.id,
+          (x['fullName'] ?? 'Unnamed driver').toString(),
+          (x['plateNumber'] ?? '').toString(),
+          (x['mtopNumber'] ?? '').toString(),
+        ));
+      }
+      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      if (!mounted) return;
+      setState(() => _drivers = list);
+    } catch (_) {
+      // The one-driver option then simply has no names to pick from.
+    }
+  }
+
   // ---------- time helpers (Philippine time, UTC+8) ----------
   DateTime _manilaNow() => DateTime.now().toUtc().add(const Duration(hours: 8));
   DateTime _toManila(Timestamp t) => t.toDate().toUtc().add(const Duration(hours: 8));
-  // Manila wall-clock date -> the real instant (as UTC) used for queries.
   DateTime _instant(DateTime manilaWall) =>
       DateTime.utc(manilaWall.year, manilaWall.month, manilaWall.day).subtract(const Duration(hours: 8));
 
@@ -123,6 +176,9 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
 
   String _fmtDate(DateTime d) => '${_shortMonths[d.month - 1]} ${d.day}, ${d.year}';
 
+  String _fmtTime(DateTime d) =>
+      '${d.hour % 12 == 0 ? 12 : d.hour % 12}:${d.minute.toString().padLeft(2, '0')} ${d.hour >= 12 ? 'PM' : 'AM'}';
+
   String _rangeLabel(DateTime start, DateTime end) {
     final last = DateTime(end.year, end.month, end.day - 1);
     switch (_period) {
@@ -163,13 +219,12 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       }
       return;
     }
+    final today = DateTime(now.year, now.month, now.day);
     final picked = await showDatePicker(
       context: context,
-      initialDate: _anchor.isAfter(DateTime(now.year, now.month, now.day))
-          ? DateTime(now.year, now.month, now.day)
-          : _anchor,
+      initialDate: _anchor.isAfter(today) ? today : _anchor,
       firstDate: DateTime(2024),
-      lastDate: DateTime(now.year, now.month, now.day),
+      lastDate: today,
     );
     if (picked != null) {
       setState(() => _anchor = picked);
@@ -205,32 +260,61 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     return list.take(n).toList();
   }
 
+  _DriverOption? get _selectedDriver {
+    for (final d in _drivers) {
+      if (d.id == _driverId) return d;
+    }
+    return null;
+  }
+
   Future<void> _generate() async {
+    if (_scope == 'driver' && _driverId == null) {
+      setState(() {
+        _report = null;
+        _error = null;
+        _loading = false;
+      });
+      return;
+    }
     setState(() {
       _loading = true;
       _error = null;
+      _visibleRides = _pageSize;
     });
     try {
       final start = _startFor(_anchor);
       final end = _endFor(start);
-      final r = _ReportData('$_periodName Report', _rangeLabel(start, end), _manilaNow());
+      final driver = _scope == 'driver' ? _selectedDriver : null;
+      final driverId = _scope == 'driver' ? _driverId : null;
+      final r = _ReportData(
+        driver == null ? '$_periodName Report' : '$_periodName Driver Report',
+        _rangeLabel(start, end),
+        _manilaNow(),
+        driver,
+      );
 
-      final docs = await _ridesBetween(start, end);
+      bool mine(Map<String, dynamic> x) => driverId == null || x['driverId'] == driverId;
+
+      final allDocs = await _ridesBetween(start, end);
       final pickups = <String, int>{};
       final dropoffs = <String, int>{};
-      final drivers = <String, int>{};
+      final rows = <_RideRow>[];
 
-      for (final d in docs) {
+      for (final d in allDocs) {
         final x = d.data();
+        if (driverId != null) {
+          final declinedBy = x['declinedBy'];
+          if (declinedBy is List && declinedBy.contains(driverId)) r.declined++;
+        }
+        if (!mine(x)) continue;
+
         r.total++;
-        final status = x['status'];
+        final status = (x['status'] ?? '').toString();
         switch (status) {
           case 'completed':
             r.completed++;
             r.fareTotal += ((x['fare'] ?? 0) as num).toDouble();
             r.commissionEarned += ((x['commissionAmount'] ?? 0) as num).toDouble();
-            final dn = (x['driverName'] ?? 'Unknown').toString();
-            drivers[dn] = (drivers[dn] ?? 0) + 1;
             if (x['completedFarFromDropoff'] == true) r.farFromDropoff++;
             break;
           case 'cancelled':
@@ -258,17 +342,38 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
         final dr = (x['dropoffLocation'] ?? '').toString().trim();
         if (dr.isNotEmpty) dropoffs[dr] = (dropoffs[dr] ?? 0) + 1;
         final c = x['createdAt'];
-        if (c is Timestamp) r.hours[_toManila(c).hour]++;
+        DateTime? when;
+        if (c is Timestamp) {
+          when = _toManila(c);
+          r.hours[when.hour]++;
+        }
+        final fareNum = x['fare'];
+        rows.add(_RideRow(
+          when,
+          p.isEmpty ? '-' : p,
+          dr.isEmpty ? '-' : dr,
+          (x['passengerName'] ?? 'Passenger').toString(),
+          (x['driverName'] ?? '').toString(),
+          status,
+          fareNum is num ? fareNum.toDouble() : null,
+        ));
       }
+      rows.sort((a, b) {
+        final aw = a.when, bw = b.when;
+        if (aw == null && bw == null) return 0;
+        if (aw == null) return 1;
+        if (bw == null) return -1;
+        return bw.compareTo(aw);
+      });
+      r.rows = rows;
       r.topPickups = _top(pickups);
       r.topDropoffs = _top(dropoffs);
-      r.topDrivers = _top(drivers);
 
-      // Previous period (for the comparison line).
-      final ps = _prevStart(start);
-      final prevDocs = await _ridesBetween(ps, start);
+      // Previous period (for the on-screen comparison).
+      final prevDocs = await _ridesBetween(_prevStart(start), start);
       for (final d in prevDocs) {
         final x = d.data();
+        if (!mine(x)) continue;
         r.prevTotal++;
         if (x['status'] == 'completed') {
           r.prevCompleted++;
@@ -276,8 +381,10 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
         }
       }
 
-      r.newPassengers = await _countUsers('passengers', start, end);
-      r.newDrivers = await _countUsers('drivers', start, end);
+      if (driverId == null) {
+        r.newPassengers = await _countUsers('passengers', start, end);
+        r.newDrivers = await _countUsers('drivers', start, end);
+      }
 
       // Commission records for the months inside this period.
       try {
@@ -292,6 +399,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
         int review = 0;
         for (final d in snap.docs) {
           if (!keys.contains(d.id)) continue;
+          if (driverId != null && d.reference.parent.parent?.id != driverId) continue;
           final x = d.data();
           earned += ((x['totalEarned'] ?? 0) as num).toDouble();
           paid += ((x['amountPaid'] ?? 0) as num).toDouble();
@@ -302,7 +410,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
         r.recBalance = (earned - paid) < 0 ? 0 : earned - paid;
         r.recPendingReview = review;
       } catch (_) {
-        // Leave null: the section then shows only the commission earned from rides.
+        // Leave null: only the commission earned from rides is shown.
       }
 
       if (!mounted) return;
@@ -341,17 +449,27 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     return '$hh $suffix';
   }
 
-  List<MapEntry<String, int>> _peakHours(_ReportData r) {
-    final list = <MapEntry<String, int>>[];
-    for (var h = 0; h < 24; h++) {
-      if (r.hours[h] > 0) list.add(MapEntry(_hourLabel(h), r.hours[h]));
-    }
-    list.sort((a, b) => b.value.compareTo(a.value));
-    return list.take(3).toList();
-  }
+  String _statusLabel(String s) => switch (s) {
+        'completed' => 'Completed',
+        'cancelled' => 'Cancelled',
+        'expired' => 'Expired',
+        'no_show' => 'No-show',
+        'pending' => 'Waiting',
+        'negotiating' => 'Negotiating',
+        'accepted' => 'On the way',
+        _ => s.isEmpty ? '-' : s,
+      };
 
-  // ---------- PDF ----------
-  Future<void> _downloadPdf() async {
+  Color _statusColor(String s) => switch (s) {
+        'completed' => _green,
+        'cancelled' => Colors.red.shade700,
+        'no_show' => Colors.orange.shade800,
+        'expired' => Colors.grey.shade700,
+        _ => Colors.blue.shade700,
+      };
+
+  // ---------- Print (one short page, A4 width x short-bond height) ----------
+  Future<void> _print() async {
     final r = _report;
     if (r == null) return;
     final doc = pw.Document();
@@ -360,8 +478,8 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     String pm(double v) => _money(v, sign: 'PHP ');
 
     pw.Widget heading(String t) => pw.Padding(
-          padding: const pw.EdgeInsets.only(top: 14, bottom: 6),
-          child: pw.Text(t, style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: green)),
+          padding: const pw.EdgeInsets.only(top: 12, bottom: 5),
+          child: pw.Text(t, style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: green)),
         );
 
     pw.Widget table(List<String> head, List<List<String>> rows) => pw.TableHelper.fromTextArray(
@@ -372,93 +490,148 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
           cellStyle: const pw.TextStyle(fontSize: 10),
           cellAlignments: {for (var i = 1; i < head.length; i++) i: pw.Alignment.centerRight},
           border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
-          cellPadding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          cellPadding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
         );
 
     List<List<String>> rank(List<MapEntry<String, int>> l) =>
         l.isEmpty ? [['No data', '-']] : [for (final e in l) [e.key, '${e.value}']];
 
-    final peaks = _peakHours(r);
+    final d = r.driver;
+    final name = _preparedBy.text.trim();
+
+    final commissionRows = <List<String>>[
+      ['Commission earned from completed rides', pm(r.commissionEarned)],
+      if (r.recTotalEarned != null) ...[
+        ['Paid', pm(r.recPaid ?? 0)],
+        ['Unpaid', pm(r.recBalance ?? 0)],
+      ],
+    ];
+
+    pw.Widget signature() => pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.SizedBox(
+              width: 230,
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('Prepared by:', style: pw.TextStyle(fontSize: 10, color: grey)),
+                  pw.SizedBox(height: 34),
+                  pw.Container(height: 0.8, color: PdfColors.black),
+                  pw.SizedBox(height: 3),
+                  pw.Text(
+                    name.isEmpty ? 'Name and signature' : name,
+                    style: pw.TextStyle(
+                      fontSize: 10,
+                      fontWeight: name.isEmpty ? pw.FontWeight.normal : pw.FontWeight.bold,
+                      color: name.isEmpty ? grey : PdfColors.black,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(
+              width: 150,
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.SizedBox(height: 44),
+                  pw.Container(height: 0.8, color: PdfColors.black),
+                  pw.SizedBox(height: 3),
+                  pw.Text('Date', style: pw.TextStyle(fontSize: 10, color: grey)),
+                ],
+              ),
+            ),
+          ],
+        );
+
+    final body = <pw.Widget>[
+      pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
+        children: [
+          pw.Image(pw.MemoryImage(base64Decode(kReportLogoBase64)), width: 62, height: 62),
+          pw.SizedBox(width: 14),
+          pw.Expanded(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(r.title, style: pw.TextStyle(fontSize: 17, fontWeight: pw.FontWeight.bold, color: green)),
+                pw.SizedBox(height: 2),
+                pw.Text('Period: ${r.rangeLabel}', style: const pw.TextStyle(fontSize: 10.5)),
+                pw.Text('Date generated: ${_fmtDate(r.generatedAt)}, ${_fmtTime(r.generatedAt)}',
+                    style: pw.TextStyle(fontSize: 9, color: grey)),
+              ],
+            ),
+          ),
+        ],
+      ),
+      pw.SizedBox(height: 6),
+      pw.Divider(color: green, thickness: 1.5),
+      if (d != null) ...[
+        heading('Driver'),
+        table(['Name', 'Plate number', 'MTOP number'], [
+          [d.name, d.plate.isEmpty ? '-' : d.plate, d.mtop.isEmpty ? '-' : d.mtop],
+        ]),
+      ],
+      heading('Rides and fares'),
+      if (d == null)
+        table(['Measure', 'Total'], [
+          ['Ride requests', '${r.total}'],
+          ['Completed', '${r.completed}'],
+          ['Cancelled', '${r.cancelled}'],
+          ['Expired (no driver found)', '${r.expired}'],
+          ['No-show', '${r.noShow}'],
+          ['Completion rate', _pct(r.completionRate)],
+          ['Total fare', pm(r.fareTotal)],
+          ['Average fare per completed ride', pm(r.avgFare)],
+        ])
+      else
+        table(['Measure', 'Total'], [
+          ['Rides accepted', '${r.total}'],
+          ['Completed', '${r.completed}'],
+          ['Cancelled', '${r.cancelled}'],
+          ['No-show', '${r.noShow}'],
+          ['Offers declined', '${r.declined}'],
+          ['Completion rate', _pct(r.completionRate)],
+          ['Total fare', pm(r.fareTotal)],
+          ['Average fare per completed ride', pm(r.avgFare)],
+        ]),
+      heading('Commission'),
+      table(['Measure', 'Amount'], commissionRows),
+      if (d == null) ...[
+        heading('Busiest places'),
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Expanded(child: table(['Top 5 pickup', 'Rides'], rank(r.topPickups))),
+            pw.SizedBox(width: 12),
+            pw.Expanded(child: table(['Top 5 drop-off', 'Rides'], rank(r.topDropoffs))),
+          ],
+        ),
+        pw.SizedBox(height: 8),
+        pw.Text(
+          'New passengers registered: ${r.newPassengers}     New drivers registered: ${r.newDrivers}',
+          style: const pw.TextStyle(fontSize: 10),
+        ),
+      ],
+      pw.Spacer(),
+      signature(),
+    ];
 
     doc.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(36),
-        footer: (ctx) => pw.Align(
-          alignment: pw.Alignment.centerRight,
-          child: pw.Text('Page ${ctx.pageNumber} of ${ctx.pagesCount}',
-              style: pw.TextStyle(fontSize: 9, color: grey)),
-        ),
-        build: (ctx) => [
-          pw.Text('Sakay Tiker', style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: green)),
-          pw.Text('A Ride-Hailing App of Bontoc, Mountain Province', style: pw.TextStyle(fontSize: 10, color: grey)),
-          pw.SizedBox(height: 10),
-          pw.Divider(color: green, thickness: 1.5),
-          pw.Text(r.title, style: pw.TextStyle(fontSize: 17, fontWeight: pw.FontWeight.bold)),
-          pw.Text('Period: ${r.rangeLabel}', style: const pw.TextStyle(fontSize: 11)),
-          pw.Text(
-            'Generated: ${_fmtDate(r.generatedAt)}, ${r.generatedAt.hour % 12 == 0 ? 12 : r.generatedAt.hour % 12}:${r.generatedAt.minute.toString().padLeft(2, '0')} ${r.generatedAt.hour >= 12 ? 'PM' : 'AM'} (Philippine time)',
-            style: pw.TextStyle(fontSize: 9, color: grey),
-          ),
-          pw.Text('Prepared by: ${_preparedBy.text.trim().isEmpty ? 'Administrator' : _preparedBy.text.trim()}',
-              style: pw.TextStyle(fontSize: 9, color: grey)),
-          heading('1. Ride summary'),
-          table(['Measure', 'Value'], [
-            ['Total ride requests', '${r.total}  (${_delta(r.total, r.prevTotal)})'],
-            ['Completed', '${r.completed}  (${_delta(r.completed, r.prevCompleted)})'],
-            ['Cancelled', '${r.cancelled}'],
-            ['Expired (no driver)', '${r.expired}'],
-            ['No-show', '${r.noShow}'],
-            ['Still active / open', '${r.active}'],
-            ['Completion rate', _pct(r.completionRate)],
-            ['Regular rides', '${r.regular}'],
-            ['Arkila rides', '${r.arkila}'],
-            ['Negotiated fares', '${r.negotiated}'],
-          ]),
-          heading('2. Fares'),
-          table(['Measure', 'Value'], [
-            ['Total fare of completed rides', '${pm(r.fareTotal)}  (${_delta(r.fareTotal, r.prevFare)})'],
-            ['Average fare per completed ride', pm(r.avgFare)],
-          ]),
-          heading('3. Commission'),
-          table(['Measure', 'Value'], [
-            ['Commission earned from completed rides', pm(r.commissionEarned)],
-            if (r.recTotalEarned != null) ...[
-              ['Commission recorded for the period', pm(r.recTotalEarned!)],
-              ['Paid by drivers', pm(r.recPaid ?? 0)],
-              ['Unpaid balance', pm(r.recBalance ?? 0)],
-              ['Receipts waiting for review', '${r.recPendingReview ?? 0}'],
-            ],
-          ]),
-          heading('4. Busiest places and times'),
-          pw.Text('Top pickup places', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 3),
-          table(['Place', 'Rides'], rank(r.topPickups)),
-          pw.SizedBox(height: 8),
-          pw.Text('Top dropoff places', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 3),
-          table(['Place', 'Rides'], rank(r.topDropoffs)),
-          pw.SizedBox(height: 8),
-          pw.Text('Peak request hours', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 3),
-          table(['Hour', 'Requests'], rank(peaks)),
-          heading('5. Top drivers (completed rides)'),
-          table(['Driver', 'Completed rides'], rank(r.topDrivers)),
-          heading('6. Users and safety'),
-          table(['Measure', 'Value'], [
-            ['New passengers registered', '${r.newPassengers}'],
-            ['New drivers registered', '${r.newDrivers}'],
-            ['Cancelled by passenger', '${r.cancelledByPassenger}'],
-            ['Cancelled by driver', '${r.cancelledByDriver}'],
-            ['No-shows', '${r.noShow}'],
-            ['Completed far from the dropoff', '${r.farFromDropoff}'],
-          ]),
-        ],
+      pw.Page(
+        // A4 width and short-bond height, so it fits either paper without cutting.
+        pageFormat: PdfPageFormat(210 * PdfPageFormat.mm, 279 * PdfPageFormat.mm, marginAll: 14 * PdfPageFormat.mm),
+        build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: body),
       ),
     );
 
-    final name = 'sakay_tiker_${_period}_report_${r.rangeLabel.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')}.pdf';
-    await Printing.sharePdf(bytes: await doc.save(), filename: name);
+    final bytes = await doc.save();
+    await Printing.layoutPdf(
+      name: 'sakay_tiker_${_period}_report_${r.rangeLabel.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')}',
+      onLayout: (format) async => bytes,
+    );
   }
 
   // ---------- UI ----------
@@ -585,11 +758,96 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     );
   }
 
+  Widget _ridesList(_ReportData r) {
+    if (r.rows.isEmpty) {
+      return Text('No rides in this period.', style: TextStyle(color: Colors.grey.shade600));
+    }
+    final shown = r.rows.length < _visibleRides ? r.rows.length : _visibleRides;
+    final showDriver = r.driver == null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < shown; i++) ...[
+          if (i > 0) Divider(height: 1, color: Colors.grey.shade200),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${r.rows[i].pickup}  →  ${r.rows[i].dropoff}',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        [
+                          if (r.rows[i].when != null) '${_fmtDate(r.rows[i].when!)}, ${_fmtTime(r.rows[i].when!)}',
+                          'Passenger: ${r.rows[i].passenger}',
+                          if (showDriver && r.rows[i].driver.isNotEmpty) 'Driver: ${r.rows[i].driver}',
+                        ].join('  •  '),
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      r.rows[i].fare == null ? '-' : _money(r.rows[i].fare!),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _statusColor(r.rows[i].status).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        _statusLabel(r.rows[i].status),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _statusColor(r.rows[i].status)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Text('Showing $shown of ${r.rows.length}', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+            const Spacer(),
+            if (_visibleRides > _pageSize)
+              TextButton(
+                onPressed: () => setState(() => _visibleRides = _pageSize),
+                child: const Text('Show less'),
+              ),
+            if (shown < r.rows.length)
+              TextButton.icon(
+                onPressed: () => setState(() => _visibleRides += _pageSize),
+                icon: const Icon(Icons.expand_more, size: 18),
+                label: const Text('See more'),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final r = _report;
     final start = _startFor(_anchor);
     final end = _endFor(start);
+    final isDriver = r?.driver != null;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
@@ -617,12 +875,42 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
               icon: const Icon(Icons.calendar_month, size: 18),
               label: Text(_rangeLabel(start, end)),
             ),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'all', label: Text('All drivers')),
+                ButtonSegment(value: 'driver', label: Text('One driver')),
+              ],
+              selected: {_scope},
+              onSelectionChanged: (s) {
+                setState(() => _scope = s.first);
+                _generate();
+              },
+            ),
+            if (_scope == 'driver')
+              DropdownMenu<String>(
+                width: 260,
+                enableFilter: true,
+                requestFocusOnTap: true,
+                label: const Text('Choose a driver'),
+                initialSelection: _driverId,
+                dropdownMenuEntries: [
+                  for (final d in _drivers)
+                    DropdownMenuEntry(
+                      value: d.id,
+                      label: d.plate.isEmpty ? d.name : '${d.name} (${d.plate})',
+                    ),
+                ],
+                onSelected: (v) {
+                  setState(() => _driverId = v);
+                  _generate();
+                },
+              ),
             SizedBox(
               width: 200,
               child: TextField(
                 controller: _preparedBy,
                 decoration: const InputDecoration(
-                  labelText: 'Prepared by',
+                  labelText: 'Prepared by (name)',
                   isDense: true,
                   border: OutlineInputBorder(),
                 ),
@@ -630,9 +918,9 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
             ),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(backgroundColor: _green, foregroundColor: Colors.white),
-              onPressed: (_loading || r == null) ? null : _downloadPdf,
-              icon: const Icon(Icons.picture_as_pdf, size: 18),
-              label: const Text('Download PDF'),
+              onPressed: (_loading || r == null) ? null : _print,
+              icon: const Icon(Icons.print, size: 18),
+              label: const Text('Print'),
             ),
             IconButton(
               tooltip: 'Refresh',
@@ -651,31 +939,55 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
             padding: const EdgeInsets.only(top: 24),
             child: Text(_error!, style: const TextStyle(color: Colors.red)),
           )
-        else if (r != null) ...[
+        else if (r == null)
+          Padding(
+            padding: const EdgeInsets.only(top: 40),
+            child: Center(
+              child: Text('Choose a driver to see the report.', style: TextStyle(color: Colors.grey.shade700)),
+            ),
+          )
+        else ...[
           const SizedBox(height: 16),
-          Text('${r.title} - ${r.rangeLabel}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          Text(
+            isDriver ? '${r.title} - ${r.driver!.name} - ${r.rangeLabel}' : '${r.title} - ${r.rangeLabel}',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          if (isDriver)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                'Plate: ${r.driver!.plate.isEmpty ? '-' : r.driver!.plate}    MTOP: ${r.driver!.mtop.isEmpty ? '-' : r.driver!.mtop}',
+                style: TextStyle(color: Colors.grey.shade700),
+              ),
+            ),
           const SizedBox(height: 10),
           Wrap(
             spacing: 12,
             runSpacing: 12,
             children: [
-              _card('Ride requests', '${r.total}', Icons.list_alt, Colors.blue.shade800, sub: _delta(r.total, r.prevTotal)),
+              _card(isDriver ? 'Rides accepted' : 'Ride requests', '${r.total}', Icons.list_alt, Colors.blue.shade800,
+                  sub: _delta(r.total, r.prevTotal)),
               _card('Completed', '${r.completed}', Icons.check_circle, _green, sub: _pct(r.completionRate)),
               _card('Cancelled', '${r.cancelled}', Icons.cancel, Colors.red.shade700),
-              _card('Total fare', _money(r.fareTotal), Icons.payments, Colors.orange.shade800, sub: _delta(r.fareTotal, r.prevFare)),
+              _card('Total fare', _money(r.fareTotal), Icons.payments, Colors.orange.shade800,
+                  sub: _delta(r.fareTotal, r.prevFare)),
               _card('Average fare', _money(r.avgFare), Icons.trending_up, Colors.teal.shade700),
               _card('Commission earned', _money(r.commissionEarned), Icons.account_balance_wallet, _green),
             ],
           ),
           _section(
-            'Rides',
+            isDriver ? 'Rides of this driver' : 'Rides',
+            _ridesList(r),
+          ),
+          _section(
+            'Totals',
             Column(children: [
               _kv('Completed', '${r.completed}'),
               _kv('Cancelled', '${r.cancelled}  (passenger ${r.cancelledByPassenger}, driver ${r.cancelledByDriver})'),
-              _kv('Expired (no driver)', '${r.expired}'),
+              if (!isDriver) _kv('Expired (no driver found)', '${r.expired}'),
               _kv('No-show', '${r.noShow}'),
               _kv('Still active / open', '${r.active}'),
+              if (isDriver) _kv('Offers declined', '${r.declined}'),
               const Divider(),
               _kv('Regular rides', '${r.regular}'),
               _kv('Arkila rides', '${r.arkila}'),
@@ -688,7 +1000,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
               _kv('Earned from completed rides', _money(r.commissionEarned)),
               if (r.recTotalEarned != null) ...[
                 _kv('Recorded for the period', _money(r.recTotalEarned!)),
-                _kv('Paid by drivers', _money(r.recPaid ?? 0)),
+                _kv('Paid', _money(r.recPaid ?? 0)),
                 _kv('Unpaid balance', _money(r.recBalance ?? 0)),
                 _kv('Receipts waiting for review', '${r.recPendingReview ?? 0}'),
               ] else
@@ -696,16 +1008,17 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
             ]),
           ),
           _section('Top pickup places', _rank(r.topPickups)),
-          _section('Top dropoff places', _rank(r.topDropoffs)),
+          _section('Top drop-off places', _rank(r.topDropoffs)),
           _section('Requests by hour of day (Philippine time)', _hoursChart(r)),
-          _section('Top drivers (completed rides)', _rank(r.topDrivers)),
           _section(
-            'Users and safety',
+            isDriver ? 'Safety' : 'Users and safety',
             Column(children: [
-              _kv('New passengers registered', '${r.newPassengers}'),
-              _kv('New drivers registered', '${r.newDrivers}'),
+              if (!isDriver) ...[
+                _kv('New passengers registered', '${r.newPassengers}'),
+                _kv('New drivers registered', '${r.newDrivers}'),
+              ],
               _kv('No-shows', '${r.noShow}'),
-              _kv('Completed far from the dropoff', '${r.farFromDropoff}'),
+              _kv('Completed far from the drop-off', '${r.farFromDropoff}'),
             ]),
           ),
         ],
